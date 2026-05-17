@@ -3,6 +3,7 @@ import hashlib
 import logging
 import os
 import re
+from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, time
 from zoneinfo import ZoneInfo
 
@@ -47,15 +48,19 @@ def is_admin(user_id: int) -> bool:
     return user_id in ADMIN_IDS
 
 
+@asynccontextmanager
 async def db():
     os.makedirs(os.path.dirname(DB_PATH), exist_ok=True) if os.path.dirname(DB_PATH) else None
     con = await aiosqlite.connect(DB_PATH)
     con.row_factory = aiosqlite.Row
-    return con
+    try:
+        yield con
+    finally:
+        await con.close()
 
 
 async def init_db():
-    async with await db() as con:
+    async with db() as con:
         await con.executescript('''
         CREATE TABLE IF NOT EXISTS settings(key TEXT PRIMARY KEY, value TEXT NOT NULL);
         CREATE TABLE IF NOT EXISTS banned_words(word TEXT PRIMARY KEY);
@@ -73,20 +78,20 @@ async def init_db():
 
 
 async def get_setting(key: str) -> str:
-    async with await db() as con:
+    async with db() as con:
         cur = await con.execute("SELECT value FROM settings WHERE key=?", (key,))
         row = await cur.fetchone()
         return row["value"] if row else DEFAULT_SETTINGS.get(key, "0")
 
 
 async def set_setting(key: str, value: str):
-    async with await db() as con:
+    async with db() as con:
         await con.execute("INSERT INTO settings(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", (key, value))
         await con.commit()
 
 
 async def count_videos() -> int:
-    async with await db() as con:
+    async with db() as con:
         cur = await con.execute("SELECT COUNT(*) c FROM videos")
         return (await cur.fetchone())["c"]
 
@@ -133,7 +138,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             expire_date=datetime.now(TZ) + timedelta(days=7),
             creates_join_request=False,
         )
-        async with await db() as con:
+        async with db() as con:
             await con.execute("INSERT OR REPLACE INTO invite_links(link,inviter_id,created_at) VALUES(?,?,?)", (link.invite_link, update.effective_user.id, datetime.now(TZ).isoformat()))
             await con.commit()
         await update.effective_message.reply_text(
@@ -178,7 +183,7 @@ async def videos_text():
 
 
 async def referral_stats():
-    async with await db() as con:
+    async with db() as con:
         cur = await con.execute("SELECT COUNT(*) c FROM referrals WHERE validated=1")
         valid = (await cur.fetchone())["c"]
     return f"📊 Parrainage\n\nInvitations validées : {valid}\nCondition : l’invité doit rester au moins 5 minutes dans le groupe."
@@ -190,7 +195,7 @@ async def private_admin_messages(update: Update, context: ContextTypes.DEFAULT_T
     msg = update.effective_message
     text = (msg.text or "").strip()
     if msg.video:
-        async with await db() as con:
+        async with db() as con:
             cur = await con.execute("SELECT COALESCE(MAX(slot),0)+1 s FROM videos")
             slot = (await cur.fetchone())["s"]
             if slot > REQUIRED_VIDEOS:
@@ -200,17 +205,17 @@ async def private_admin_messages(update: Update, context: ContextTypes.DEFAULT_T
             await con.commit()
         await msg.reply_text(f"✅ Vidéo ajoutée : {slot}/{REQUIRED_VIDEOS}")
     elif text.startswith("+") and len(text) > 1:
-        async with await db() as con:
+        async with db() as con:
             await con.execute("INSERT OR IGNORE INTO banned_words(word) VALUES(?)", (text[1:].lower(),))
             await con.commit()
         await msg.reply_text("✅ Mot ajouté.")
     elif text.startswith("-") and len(text) > 1:
-        async with await db() as con:
+        async with db() as con:
             await con.execute("DELETE FROM banned_words WHERE word=?", (text[1:].lower(),))
             await con.commit()
         await msg.reply_text("✅ Mot supprimé.")
     elif text.lower() == "liste":
-        async with await db() as con:
+        async with db() as con:
             cur = await con.execute("SELECT word FROM banned_words ORDER BY word")
             words = [r["word"] for r in await cur.fetchall()]
         await msg.reply_text("🚫 Mots interdits :\n" + (", ".join(words) if words else "Aucun"))
@@ -238,7 +243,7 @@ async def group_messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not msg or not user or user.is_bot or update.effective_chat.id != GROUP_ID:
         return
     name = user.mention_html() if user.username else (user.full_name or "cet utilisateur")
-    async with await db() as con:
+    async with db() as con:
         await con.execute("INSERT OR REPLACE INTO group_messages(message_id,created_at) VALUES(?,?)", (msg.message_id, datetime.now(TZ).isoformat()))
         await con.commit()
     if await get_setting("group_open") != "1" and not is_admin(user.id):
@@ -263,13 +268,13 @@ async def group_messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def check_banned_words(msg, context, user, name, text):
     if not text:
         return
-    async with await db() as con:
+    async with db() as con:
         cur = await con.execute("SELECT word FROM banned_words")
         words = [r["word"] for r in await cur.fetchall()]
     lowered = text.lower()
     if not any(w and w in lowered for w in words):
         return
-    async with await db() as con:
+    async with db() as con:
         cur = await con.execute("SELECT count FROM violations WHERE user_id=? AND kind='word'", (user.id,))
         row = await cur.fetchone()
         count = (row["count"] if row else 0) + 1
@@ -295,7 +300,7 @@ async def check_media_repost(msg, context):
         return
     h = hashlib.sha256(file_id.encode()).hexdigest()
     cutoff = (datetime.now(TZ) - timedelta(days=4)).isoformat()
-    async with await db() as con:
+    async with db() as con:
         await con.execute("DELETE FROM media_hashes WHERE created_at < ?", (cutoff,))
         cur = await con.execute("SELECT hash FROM media_hashes WHERE hash=?", (h,))
         exists = await cur.fetchone()
@@ -335,7 +340,7 @@ async def chat_member_update(update: Update, context: ContextTypes.DEFAULT_TYPE)
         invite = cmu.invite_link.invite_link if cmu.invite_link else None
         if not invite:
             return
-        async with await db() as con:
+        async with db() as con:
             cur = await con.execute("SELECT inviter_id FROM invite_links WHERE link=?", (invite,))
             row = await cur.fetchone()
             if not row:
@@ -352,7 +357,7 @@ async def validate_referral(context):
     try:
         cm = await context.bot.get_chat_member(GROUP_ID, data["invitee"])
         if cm.status in [ChatMemberStatus.MEMBER, ChatMemberStatus.ADMINISTRATOR, ChatMemberStatus.OWNER]:
-            async with await db() as con:
+            async with db() as con:
                 await con.execute("UPDATE referrals SET validated=1 WHERE invitee_id=?", (data["invitee"],))
                 await con.commit()
             await deliver_rewards(context, data["inviter"])
@@ -370,7 +375,7 @@ def reward_count(validated):
 
 
 async def deliver_rewards(context, user_id):
-    async with await db() as con:
+    async with db() as con:
         cur = await con.execute("SELECT COUNT(*) c FROM referrals WHERE inviter_id=? AND validated=1", (user_id,))
         valid = (await cur.fetchone())["c"]
         target = reward_count(valid)
@@ -408,7 +413,7 @@ async def close_group(context):
     await context.bot.set_chat_permissions(GROUP_ID, perms)
     await warn_group(context, "🔴 Groupe fermé, vous ne pouvez plus envoyer.")
     # Telegram ne permet pas d’effacer tout l’historique arbitrairement. Le bot supprime les messages qu’il a vus et enregistrés.
-    async with await db() as con:
+    async with db() as con:
         cur = await con.execute("SELECT message_id FROM group_messages")
         ids = [r["message_id"] for r in await cur.fetchall()]
         await con.execute("DELETE FROM group_messages")
