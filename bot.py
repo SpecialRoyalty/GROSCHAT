@@ -17,6 +17,8 @@ from telegram.ext import (
     filters,
 )
 
+APP_VERSION = "FORCE_MIGRATION_V5_2026_05_18"
+
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 ADMIN_IDS = [int(x.strip()) for x in os.getenv("ADMIN_IDS", "").split(",") if x.strip()]
 GROUP_ID = int(os.getenv("GROUP_ID", "0"))
@@ -33,9 +35,21 @@ URL_RE = re.compile(r"(https?://|www\.|t\.me/|telegram\.me/|discord\.gg/)", re.I
 
 async def init_db():
     global db_pool
+
+    if not DATABASE_URL:
+        raise RuntimeError("DATABASE_URL missing")
+    if not BOT_TOKEN:
+        raise RuntimeError("BOT_TOKEN missing")
+    if not WEBHOOK_URL:
+        raise RuntimeError("WEBHOOK_URL missing")
+
+    print(f"STARTING BOT VERSION: {APP_VERSION}", flush=True)
+
     db_pool = await asyncpg.create_pool(DATABASE_URL)
 
     async with db_pool.acquire() as con:
+        print("CREATING TABLES...", flush=True)
+
         await con.execute("""
         CREATE TABLE IF NOT EXISTS settings(
             key TEXT PRIMARY KEY,
@@ -114,6 +128,20 @@ async def init_db():
         )
         """)
 
+        await con.execute("""
+        CREATE TABLE IF NOT EXISTS schema_version(
+            id INTEGER PRIMARY KEY,
+            version TEXT NOT NULL,
+            updated_at TIMESTAMP DEFAULT NOW()
+        )
+        """)
+
+        await con.execute("""
+        INSERT INTO schema_version(id, version, updated_at)
+        VALUES(1, $1, NOW())
+        ON CONFLICT(id) DO UPDATE SET version=$1, updated_at=NOW()
+        """, APP_VERSION)
+
         defaults = {
             "moderation": "on",
             "anti_links": "on",
@@ -130,6 +158,14 @@ async def init_db():
                 "INSERT INTO settings(key,value) VALUES($1,$2) ON CONFLICT(key) DO NOTHING",
                 k, v
             )
+
+        rows = await con.fetch("""
+        SELECT table_name
+        FROM information_schema.tables
+        WHERE table_schema='public'
+        ORDER BY table_name
+        """)
+        print("TABLES IN DATABASE:", [r["table_name"] for r in rows], flush=True)
 
 
 async def get_setting(key, default=None):
@@ -151,6 +187,17 @@ async def count_table(table):
         return await con.fetchval(f"SELECT COUNT(*) FROM {table}")
 
 
+async def get_table_names():
+    async with db_pool.acquire() as con:
+        rows = await con.fetch("""
+        SELECT table_name
+        FROM information_schema.tables
+        WHERE table_schema='public'
+        ORDER BY table_name
+        """)
+        return [r["table_name"] for r in rows]
+
+
 async def save_message_by_ids(chat_id, message_id, user_id=None, is_bot=False):
     async with db_pool.acquire() as con:
         await con.execute("""
@@ -163,6 +210,7 @@ async def save_message_by_ids(chat_id, message_id, user_id=None, is_bot=False):
 async def send_group_and_record(context: ContextTypes.DEFAULT_TYPE, text: str, **kwargs):
     msg = await context.bot.send_message(GROUP_ID, text, **kwargs)
     await save_message_by_ids(GROUP_ID, msg.message_id, None, True)
+    print(f"BOT MESSAGE SAVED: chat={GROUP_ID} message_id={msg.message_id}", flush=True)
     return msg
 
 
@@ -244,11 +292,14 @@ async def build_status_text(extra=""):
         auto_schedule = await con.fetchval("SELECT value FROM settings WHERE key='auto_schedule'")
         group_open = await con.fetchval("SELECT value FROM settings WHERE key='group_open'")
 
+    tables = await get_table_names()
     video_ok = "✅" if videos >= 60 else "❌"
 
     text = (
         "⚙️ PANEL ADMIN\n\n"
+        f"🧩 Version : {APP_VERSION}\n"
         "🗄️ Base PostgreSQL : ✅ branchée\n"
+        f"📋 Tables : {len(tables)}\n"
         f"👥 Groupe : {'✅' if GROUP_ID else '❌'} branché\n"
         f"🚪 Groupe ouvert : {led(group_open)}\n\n"
         f"🛡️ Modération : {led(moderation)}\n"
@@ -320,50 +371,32 @@ async def callbacks(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if data == "words_menu":
         await set_admin_state(q.from_user.id, None)
-        await safe_edit(
-            q,
-            "🚫 MOTS INTERDITS\n\nChoisis une action :",
-            reply_markup=await words_keyboard()
-        )
+        await safe_edit(q, "🚫 MOTS INTERDITS\n\nChoisis une action :", reply_markup=await words_keyboard())
         return
 
     if data == "word_add":
         await set_admin_state(q.from_user.id, "adding_word")
-        await safe_edit(
-            q,
-            "➕ AJOUTER UN MOT\n\nEnvoie maintenant le mot interdit en message privé au bot.\n\nExemple : arnaque",
-            reply_markup=back_keyboard()
-        )
+        await safe_edit(q, "➕ AJOUTER UN MOT\n\nEnvoie maintenant le mot interdit en message privé au bot.", reply_markup=back_keyboard())
         return
 
     if data == "word_delete":
         await set_admin_state(q.from_user.id, "deleting_word")
-        await safe_edit(
-            q,
-            "➖ SUPPRIMER UN MOT\n\nEnvoie maintenant le mot à supprimer en message privé au bot.",
-            reply_markup=back_keyboard()
-        )
+        await safe_edit(q, "➖ SUPPRIMER UN MOT\n\nEnvoie maintenant le mot à supprimer en message privé au bot.", reply_markup=back_keyboard())
         return
 
     if data == "word_list":
         async with db_pool.acquire() as con:
             rows = await con.fetch("SELECT word FROM banned_words ORDER BY word")
         words = "\n".join([f"• {r['word']}" for r in rows]) or "Aucun mot interdit."
-        await safe_edit(
-            q,
-            f"📋 LISTE DES MOTS INTERDITS\n\n{words}",
-            reply_markup=await words_keyboard()
-        )
+        await safe_edit(q, f"📋 LISTE DES MOTS INTERDITS\n\n{words}", reply_markup=await words_keyboard())
         return
 
     if data == "videos_menu":
         videos = await count_table("reward_videos")
         await safe_edit(
             q,
-            f"🎁 VIDÉOS RÉCOMPENSES\n\n"
-            f"Statut : {videos}/60 {'✅' if videos >= 60 else '❌'}\n\n"
-            "Pour ajouter une vidéo, envoie une vidéo au bot en privé depuis ton compte admin.\n"
-            "Le bot la met automatiquement dans le prochain slot libre.",
+            f"🎁 VIDÉOS RÉCOMPENSES\n\nStatut : {videos}/60 {'✅' if videos >= 60 else '❌'}\n\n"
+            "Pour ajouter une vidéo, envoie une vidéo au bot en privé depuis ton compte admin.",
             reply_markup=back_keyboard()
         )
         return
@@ -392,14 +425,16 @@ async def close_group_and_clean(context: ContextTypes.DEFAULT_TYPE):
     async with db_pool.acquire() as con:
         rows = await con.fetch("SELECT chat_id, message_id FROM messages WHERE chat_id=$1 ORDER BY created_at ASC", GROUP_ID)
 
+    print(f"CLOSING GROUP. MESSAGES TO DELETE: {len(rows)}", flush=True)
+
     deleted = 0
     for row in rows:
         try:
             await context.bot.delete_message(row["chat_id"], row["message_id"])
             deleted += 1
             await asyncio.sleep(0.03)
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"DELETE FAILED message_id={row['message_id']} error={e}", flush=True)
 
     async with db_pool.acquire() as con:
         await con.execute("DELETE FROM messages WHERE chat_id=$1", GROUP_ID)
@@ -532,7 +567,6 @@ async def handle_private_admin(update: Update, context: ContextTypes.DEFAULT_TYP
         await msg.reply_text(f"✅ Mot supprimé : {word}")
         return
 
-    # Compatibilité avec l'ancien format
     if text.startswith("mot:"):
         word = text.split(":", 1)[1].strip().lower()
         async with db_pool.acquire() as con:
@@ -547,11 +581,7 @@ async def handle_private_admin(update: Update, context: ContextTypes.DEFAULT_TYP
         await msg.reply_text(f"✅ Mot supprimé : {word}")
         return
 
-    await msg.reply_text(
-        "Admin prêt.\n\n"
-        "Envoie /start pour ouvrir le panel.\n"
-        "Ou envoie une vidéo pour l'ajouter aux récompenses."
-    )
+    await msg.reply_text("Admin prêt. Envoie /start pour ouvrir le panel.")
 
 
 async def handle_group_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -643,7 +673,7 @@ async def post_init(app):
 
 
 async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE):
-    print(f"ERROR: {context.error}")
+    print(f"ERROR: {context.error}", flush=True)
 
 
 def main():
