@@ -1,4 +1,4 @@
-# Telegram Railway Bot - FINAL_COMPLETE_V11
+# Telegram Railway Bot - FINAL_COMPLETE_V12
 
 ## Nouveautés V11
 
@@ -37,7 +37,7 @@ PORT=8080
 
 Dans les logs Railway :
 
-STARTING FINAL_COMPLETE_V11
+STARTING FINAL_COMPLETE_V12
 
 ## Droits Telegram requis
 
@@ -55,3 +55,20 @@ Si tu as des erreurs de colonnes à cause d'une ancienne base, supprime seulemen
 pending_joins, referrals, referral_links, user_rewards, referrer_abuse, reward_links, participants, banned_hashes, media_fingerprints, danger_scores
 
 Ne supprime pas settings si tu veux garder les réglages.
+
+
+## V12 - Correction compte à rebours
+
+Ouverture :
+- > 1h : message par heure.
+- 1h avant : Prochaine ouverture dans 1 heure.
+- 30 min avant : Prochaine ouverture dans 30 minutes.
+- 10 min avant : Ouverture dans 10 minutes.
+- 5,4,3,2,1 min avant : compte à rebours minute par minute.
+- puis ouverture automatique.
+
+Fermeture :
+- 30 min avant : avertissement.
+- 15 min avant : avertissement.
+- 5,4,3,2,1 min avant : compte à rebours minute par minute.
+- puis fermeture + suppression de session.
