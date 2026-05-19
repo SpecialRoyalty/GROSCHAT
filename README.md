@@ -39,3 +39,16 @@ Dans les logs Railway :
 STARTING FINAL_COMPLETE_V13
 
 Si tu vois encore “Vidéo ajoutée”, Railway tourne encore sur une ancienne version.
+
+
+## V14
+
+Horaires :
+- semaine : 22h00 → 00h00
+- samedi : 23h00 → 01h00
+- dimanche : 22h30 → 00h15
+
+Countdown corrigé :
+- heures avant dernière heure
+- minutes pendant dernière heure
+- fermeture : 30 min, 15 min puis minute par minute.

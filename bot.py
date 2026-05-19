@@ -1,4 +1,20 @@
 
+# Horaires dynamiques V14
+def get_schedule_for_day(now):
+    wd = now.weekday()
+
+    # samedi
+    if wd == 5:
+        return {"open_hour": 23, "open_minute": 0, "close_hour": 1, "close_minute": 0}
+
+    # dimanche
+    if wd == 6:
+        return {"open_hour": 22, "open_minute": 30, "close_hour": 0, "close_minute": 15}
+
+    # semaine
+    return {"open_hour": 22, "open_minute": 0, "close_hour": 0, "close_minute": 0}
+
+
 import os
 import re
 import asyncio
@@ -19,7 +35,7 @@ from telegram.ext import (
     filters,
 )
 
-APP_VERSION = "FINAL_COMPLETE_V13"
+APP_VERSION = "FINAL_COMPLETE_V14"
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 BOT_USERNAME = os.getenv("BOT_USERNAME", "").replace("@", "")
