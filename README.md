@@ -1,23 +1,26 @@
-# Telegram Railway Bot - FINAL_COMPLETE_V10
+# Telegram Railway Bot - FINAL_COMPLETE_V11
 
-## Inclus
+## Nouveautés V11
 
-- Panel admin avec boutons via /start en privé
-- PostgreSQL Railway avec DATABASE_URL
-- Ouverture / fermeture par session
-- Suppression de tous les messages entre ouverture et fermeture
-- Suppression des messages Telegram d'entrée et sortie
-- Anti-liens : ban
-- Photo avec mention : ban
-- Mots interdits : mute 1j, puis 1 semaine, puis ban
-- Anti-repost média sur 4 jours
-- Upload de 60 vidéos en privé par admin
-- Bouton 📢 Publier publicité activé uniquement à 60/60 vidéos
-- Publicité avec bouton 🎁 Recevoir mon lien privé
-- Lien personnalisé par utilisateur
-- Validation après 5 minutes côté bot, sans l'afficher dans la pub
-- Envoi automatique des vidéos selon paliers
-- Stats parrainage
+- Participation ON/OFF : avant d'écrire, un membre doit envoyer une photo ou vidéo nouvelle.
+- Participation validée à vie après 1 média nouveau.
+- Si média déjà vu : pas de validation, suppression et message d'avertissement.
+- Relance non-participants par lots de 20 à l'ouverture.
+- Kick des non-participants après 3 jours sans participation.
+- Hash média SHA256 téléchargé depuis Telegram, plus solide que file_unique_id.
+- Anti-repost étendu à 10 jours via hash.
+- Ban hash : l'admin envoie une photo/vidéo au bot, son hash est banni.
+- Si hash banni republié : ban direct + message automatique.
+- Règles auto toutes les 15 minutes quand le groupe est ouvert, l'ancien message règles est supprimé.
+- Bilan de sanctions toutes les 20 minutes quand le groupe est ouvert.
+- Silent mode : sanctions visibles ON/OFF.
+- Mode RAID ON/OFF : nouveaux membres mute et médias bloqués.
+- Broadcast groupe depuis le panel admin.
+- Les commandes / dans le groupe sont supprimées ; récidive = mute 1 mois.
+- Ajout de bot interdit.
+- Admins Telegram / owner / ADMIN_IDS exemptés des liens et transferts.
+- Non-admins : liens et transferts = ban.
+- Récompenses remplacées par 4 liens hébergeur : 1, 10, 50, 60.
 
 ## Variables Railway
 
@@ -30,29 +33,25 @@ TIMEZONE=Europe/Paris
 WEBHOOK_URL=https://TONAPP.up.railway.app
 PORT=8080
 
+## Vérification
+
+Dans les logs Railway :
+
+STARTING FINAL_COMPLETE_V11
+
 ## Droits Telegram requis
 
-Le bot doit être admin du groupe avec :
+Le bot doit être admin avec :
 - supprimer messages
 - bannir utilisateurs
 - restreindre utilisateurs
 - gérer permissions
 - inviter via lien
 
-## Vérification
+## Base ancienne
 
-Dans les logs Railway, tu dois voir :
+Si tu as des erreurs de colonnes à cause d'une ancienne base, supprime seulement les tables concernées :
 
-STARTING FINAL_COMPLETE_V10
+pending_joins, referrals, referral_links, user_rewards, referrer_abuse, reward_links, participants, banned_hashes, media_fingerprints, danger_scores
 
-Dans le panel admin, tu dois voir :
-- 📢 Publier publicité
-- 📊 Stats parrainage
-
-
-## V10
-- Horaire Europe/Paris 23h-1h maintenu automatiquement.
-- Ouverture auto même si le bot redémarre pendant la plage.
-- Fermeture auto avec suppression de session.
-- Admins/owner exemptés liens et transferts.
-- Non-admins : liens et transferts interdits.
+Ne supprime pas settings si tu veux garder les réglages.
