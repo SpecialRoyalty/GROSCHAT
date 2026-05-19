@@ -35,7 +35,7 @@ from telegram.ext import (
     filters,
 )
 
-APP_VERSION = "FINAL_COMPLETE_V15"
+APP_VERSION = "FINAL_COMPLETE_V17"
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 BOT_USERNAME = os.getenv("BOT_USERNAME", "").replace("@", "")
@@ -254,6 +254,7 @@ async def init_db():
             "rules_auto": "off",
             "rules_text": "📌 Règles du groupe : respect, pas de lien, pas de repost, participez avec un média nouveau.",
             "rules_message_id": "0",
+            "last_countdown_key": "",
             "ban_report_count": "0",
             "group_open": "off",
             "open_hour": "23",
@@ -999,6 +1000,68 @@ async def open_group(context: ContextTypes.DEFAULT_TYPE):
     print(f"SESSION OPEN {sid}", flush=True)
 
 
+
+
+async def send_trusted_session_report(context: ContextTypes.DEFAULT_TYPE, session_id: int, deleted_count: int):
+    if not session_id:
+        return
+
+    async with db_pool.acquire() as con:
+        rows = await con.fetch("""
+        SELECT trusted_id, action, COUNT(*) AS total
+        FROM trusted_actions
+        WHERE session_id=$1
+        GROUP BY trusted_id, action
+        ORDER BY trusted_id, action
+        """, session_id)
+
+        strikes = await con.fetch("""
+        SELECT target_user_id, strikes
+        FROM trusted_strikes
+        WHERE session_id=$1
+        ORDER BY strikes DESC
+        LIMIT 20
+        """, session_id)
+
+    by_user = {}
+    for r in rows:
+        tid = r["trusted_id"]
+        by_user.setdefault(tid, {"supprime": 0, "ban": 0})
+        by_user[tid][r["action"]] = r["total"]
+
+    lines = [
+        f"📊 Bilan modération trusted — Session #{session_id}",
+        "",
+        f"🧹 Messages supprimés à la fermeture : {deleted_count}",
+        "",
+    ]
+
+    if not by_user:
+        lines.append("Aucune action trusted pendant cette session.")
+    else:
+        for tid, data in by_user.items():
+            sup = data.get("supprime", 0)
+            ban = data.get("ban", 0)
+            sup_limit = " ⚠️ limite atteinte" if sup >= 20 else ""
+            ban_limit = " ⚠️ limite atteinte" if ban >= 20 else ""
+            lines.append(f"👤 Trusted ID {tid}")
+            lines.append(f"• /supprime : {sup}{sup_limit}")
+            lines.append(f"• /ban : {ban}{ban_limit}")
+            lines.append("")
+
+    if strikes:
+        lines.append("🎯 Utilisateurs avec strikes :")
+        for s in strikes:
+            lines.append(f"• {s['target_user_id']} : {s['strikes']} strike(s)")
+
+    text = "\n".join(lines)
+
+    for admin_id in ADMIN_IDS:
+        try:
+            await context.bot.send_message(admin_id, text)
+        except Exception as e:
+            print(f"TRUSTED REPORT SEND ERROR admin={admin_id}: {e}", flush=True)
+
 async def close_group_and_clean(context: ContextTypes.DEFAULT_TYPE):
     sid = await current_session_id()
     await set_setting("group_open", "off")
@@ -1048,6 +1111,8 @@ async def close_group_and_clean(context: ContextTypes.DEFAULT_TYPE):
         "closed",
         record_in_session=False,
     )
+
+    await send_trusted_session_report(context, sid, deleted)
     return deleted
 
 
@@ -1579,10 +1644,47 @@ async def ban_report(context):
 
 # ---------------- SCHEDULE ----------------
 
-def is_open_window(now: datetime, open_hour: int, close_hour: int) -> bool:
-    if open_hour < close_hour:
-        return open_hour <= now.hour < close_hour
-    return now.hour >= open_hour or now.hour < close_hour
+def get_schedule_for_day(now: datetime):
+    # 0=lundi, 5=samedi, 6=dimanche
+    wd = now.weekday()
+    if wd == 5:
+        return {"open_hour": 23, "open_minute": 0, "close_hour": 1, "close_minute": 0}
+    if wd == 6:
+        return {"open_hour": 22, "open_minute": 30, "close_hour": 0, "close_minute": 15}
+    return {"open_hour": 22, "open_minute": 0, "close_hour": 0, "close_minute": 0}
+
+
+def target_datetime(now: datetime, hour: int, minute: int):
+    target = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
+    if target <= now:
+        target += timedelta(days=1)
+    return target
+
+
+def minutes_until(now: datetime, hour: int, minute: int) -> int:
+    seconds = int((target_datetime(now, hour, minute) - now).total_seconds())
+    return max(0, (seconds + 59) // 60)
+
+
+def is_open_window_precise(now: datetime, schedule: dict) -> bool:
+    open_today = now.replace(hour=schedule["open_hour"], minute=schedule["open_minute"], second=0, microsecond=0)
+    close_today = now.replace(hour=schedule["close_hour"], minute=schedule["close_minute"], second=0, microsecond=0)
+
+    if close_today <= open_today:
+        close_today += timedelta(days=1)
+
+    open_yesterday = open_today - timedelta(days=1)
+    close_yesterday = close_today - timedelta(days=1)
+
+    return (open_today <= now < close_today) or (open_yesterday <= now < close_yesterday)
+
+
+async def send_countdown_once(context: ContextTypes.DEFAULT_TYPE, key: str, text: str):
+    last = await get_setting("last_countdown_key", "")
+    if last == key:
+        return
+    await set_setting("last_countdown_key", key)
+    await send_system_message(context, text, "countdown", record_in_session=False)
 
 
 async def hourly_job(context: ContextTypes.DEFAULT_TYPE):
@@ -1590,34 +1692,62 @@ async def hourly_job(context: ContextTypes.DEFAULT_TYPE):
         return
 
     now = datetime.now(TZ)
-    open_hour = int(await get_setting("open_hour", "23"))
-    close_hour = int(await get_setting("close_hour", "1"))
+    schedule = get_schedule_for_day(now)
+
     group_open = await get_setting("group_open", "off")
-    should_be_open = is_open_window(now, open_hour, close_hour)
+    should_be_open = is_open_window_precise(now, schedule)
+
+    open_h = schedule["open_hour"]
+    open_m = schedule["open_minute"]
+    close_h = schedule["close_hour"]
+    close_m = schedule["close_minute"]
 
     if should_be_open and group_open != "on":
+        await set_setting("last_countdown_key", "")
         await open_group(context)
         await warn_non_participants(context)
         return
 
     if not should_be_open and group_open == "on":
+        await set_setting("last_countdown_key", "")
         await close_group_and_clean(context)
         return
 
-    if now.minute == 0 and not should_be_open:
-        target = now.replace(hour=open_hour, minute=0, second=0, microsecond=0)
-        if target <= now:
-            target += timedelta(days=1)
-        hours = int((target - now).total_seconds() // 3600)
-        try:
-            await send_system_message(
-                context,
-                f"⏰ Prochaine ouverture dans {hours} heure(s).",
-                "countdown",
-                record_in_session=False,
-            )
-        except Exception as e:
-            print(f"COUNTDOWN ERROR: {e}", flush=True)
+    # Groupe fermé : countdown vers ouverture.
+    if group_open != "on":
+        m = minutes_until(now, open_h, open_m)
+
+        # Avant la dernière heure : uniquement à l'heure pile, en heures.
+        if m > 60:
+            if now.minute == 0:
+                hours = max(1, (m + 59) // 60)
+                await send_countdown_once(
+                    context,
+                    f"open_h_{hours}",
+                    f"⏰ Prochaine ouverture dans {hours} heure(s)."
+                )
+            return
+
+        # Dernière heure : en minutes.
+        if m == 60:
+            await send_countdown_once(context, "open_60", "⏰ Prochaine ouverture dans 60 minutes.")
+        elif m == 30:
+            await send_countdown_once(context, "open_30", "⏰ Prochaine ouverture dans 30 minutes.")
+        elif m == 10:
+            await send_countdown_once(context, "open_10", "⏰ Ouverture dans 10 minutes.")
+        elif 1 <= m <= 5:
+            await send_countdown_once(context, f"open_{m}", f"⏰ Ouverture dans {m} minute(s).")
+        return
+
+    # Groupe ouvert : countdown vers fermeture.
+    m = minutes_until(now, close_h, close_m)
+
+    if m == 30:
+        await send_countdown_once(context, "close_30", "⚠️ Fermeture du groupe dans 30 minutes.")
+    elif m == 15:
+        await send_countdown_once(context, "close_15", "⚠️ Fermeture du groupe dans 15 minutes.")
+    elif 1 <= m <= 5:
+        await send_countdown_once(context, f"close_{m}", f"⚠️ Fermeture dans {m} minute(s).")
 
 
 async def post_init(app):

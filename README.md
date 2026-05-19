@@ -1,4 +1,4 @@
-# Telegram Railway Bot - FINAL_COMPLETE_V15
+# Telegram Railway Bot - FINAL_COMPLETE_V17
 
 Version cohérente après remplacement des 60 vidéos par des liens récompenses.
 
@@ -36,7 +36,7 @@ PORT=8080
 
 Dans les logs Railway :
 
-STARTING FINAL_COMPLETE_V15
+STARTING FINAL_COMPLETE_V17
 
 Si tu vois encore “Vidéo ajoutée”, Railway tourne encore sur une ancienne version.
 
@@ -86,4 +86,36 @@ Protection :
 - impossible de cibler TRUSTED_IDS.
 
 Vérification logs Railway :
-STARTING FINAL_COMPLETE_V15
+STARTING FINAL_COMPLETE_V17
+
+
+## V16 - Bilan trusted fin de session
+
+À chaque fermeture de session, le bot envoie en privé à chaque ADMIN_ID :
+
+- session concernée ;
+- nombre de messages supprimés à la fermeture ;
+- nombre de /supprime par trusted ;
+- nombre de /ban par trusted ;
+- alerte si limite 20 atteinte ;
+- liste des utilisateurs ayant reçu des strikes.
+
+Le rapport utilise la table trusted_actions déjà ajoutée en V15.
+
+
+## V17 - Countdown corrigé
+
+Horaires :
+- Lundi à vendredi : 22h00 → 00h00
+- Samedi : 23h00 → 01h00
+- Dimanche : 22h30 → 00h15
+
+Ouverture :
+- avant la dernière heure : affichage en heures à l'heure pile ;
+- dernière heure : affichage en minutes ;
+- 60, 30, 10, puis 5/4/3/2/1 minutes.
+
+Fermeture :
+- 30 min avant ;
+- 15 min avant ;
+- 5/4/3/2/1 min avant.
