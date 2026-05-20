@@ -1533,12 +1533,12 @@ async def save_user_message_if_session(update: Update):
 # PUBLIC MESSAGES V24
 # =========================
 
-MSG_PARTICIPATION_REQUIRED = "⚠️ Merci de participer avant d’envoyer un message.\nEnvoyez au moins 1 photo ou 1 vidéo jamais publiée."
-MSG_REPOST = "♻️ Ce média a déjà été publié."
+MSG_PARTICIPATION_REQUIRED = "⚠️ Merci de participer avant d’envoyer un message.\nEnvoyez au moins 1 photo ou 1 vidéo FR jamais publiée."
+MSG_REPOST = "♻️ Ce média a déjà été publié.Merci d'envoyez un média FR et surtout qui n'a pas tourné 328371 fois"
 MSG_LINK_FORBIDDEN = "🔗 Les liens ne sont pas autorisés."
 MSG_FORWARD_FORBIDDEN = "🚫 Les transferts ne sont pas autorisés."
 MSG_GENERIC_FORBIDDEN = "🚫 Message non autorisé."
-MSG_FAKE_COMMAND = MSG_FAKE_COMMAND
+MSG_FAKE_COMMAND = "🔇 Commande réservée à la modération.\nSi vous essayez encore, vous serez banni."
 MSG_PRIVATE_LINK_TITLE = "🎁 Voici votre lien privé de parrainage."
 MSG_REWARD_UNLOCKED = "🎉 Récompense débloquée."
 
