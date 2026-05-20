@@ -1,4 +1,4 @@
-# Telegram Railway Bot - FINAL_COMPLETE_V22
+# Telegram Railway Bot - FINAL_COMPLETE_V23
 
 Version cohérente nettoyée.
 
@@ -31,7 +31,7 @@ Version cohérente nettoyée.
 
 Dans les logs :
 
-STARTING FINAL_COMPLETE_V22
+STARTING FINAL_COMPLETE_V23
 
 Si tu vois encore `Vidéos : x/60`, c'est que Railway tourne encore sur une ancienne version.
 
@@ -79,7 +79,7 @@ Message d'avertissement enrichi :
 - Compatible base neuve et ancienne base partiellement migrée.
 
 Vérification Railway :
-STARTING FINAL_COMPLETE_V22
+STARTING FINAL_COMPLETE_V23
 
 
 ## V22 - Correction complète SQL / hash / anti-repost
@@ -101,9 +101,31 @@ Important :
 - sinon V22 tente de réparer automatiquement le schéma.
 
 Vérification Railway :
-STARTING FINAL_COMPLETE_V22
+STARTING FINAL_COMPLETE_V23
 
 Test rapide :
 1. envoie une photo ;
 2. renvoie exactement la même photo ;
 3. le bot doit supprimer la deuxième avec `♻️ C’est du vu et déjà vu.`
+
+
+## V23 - Modération silencieuse premium
+
+Changements :
+- Les non-trusted utilisant `/ban` ou `/supprimer` :
+  - commande supprimée ;
+  - mute 2 jours ;
+  - warning discret auto-delete.
+
+- Les trusted :
+  - `/ban` silencieux ;
+  - `/supprimer` silencieux ;
+  - commandes supprimées automatiquement.
+
+- Suppression des messages techniques :
+  - plus de message hash ;
+  - plus de validation participation ;
+  - plus de spam mode raid.
+
+Vérification Railway :
+STARTING FINAL_COMPLETE_V23

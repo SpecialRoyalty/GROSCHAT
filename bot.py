@@ -35,7 +35,7 @@ from telegram.ext import (
     filters,
 )
 
-APP_VERSION = "FINAL_COMPLETE_V22"
+APP_VERSION = "FINAL_COMPLETE_V23"
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 BOT_USERNAME = os.getenv("BOT_USERNAME", "").replace("@", "")
@@ -1490,7 +1490,7 @@ async def handle_private_admin(update: Update, context: ContextTypes.DEFAULT_TYP
             ON CONFLICT(hash) DO UPDATE SET reason=$3
             """, h, media_type(msg), "hash interdit admin")
         await set_admin_state(user.id, None)
-        await msg.reply_text("✅ Hash banni. Toute republication sera bannie automatiquement.")
+        await msg.reply_text("✅ ✅ Média interdit enregistré.")
         return
     if message_has_media(msg):
         await msg.reply_text("ℹ️ Média reçu, mais aucun mode actif. Pour bannir un hash, clique d’abord sur 🚫 Ban hash dans le panel.")
@@ -2079,3 +2079,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+# trusted ban silent
+
+# trusted supprimer silent
