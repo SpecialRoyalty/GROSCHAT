@@ -1,4 +1,4 @@
-# Telegram Railway Bot - FINAL_COMPLETE_V23
+# Telegram Railway Bot - FINAL_COMPLETE_V24
 
 Version cohérente nettoyée.
 
@@ -31,7 +31,7 @@ Version cohérente nettoyée.
 
 Dans les logs :
 
-STARTING FINAL_COMPLETE_V23
+STARTING FINAL_COMPLETE_V24
 
 Si tu vois encore `Vidéos : x/60`, c'est que Railway tourne encore sur une ancienne version.
 
@@ -79,7 +79,7 @@ Message d'avertissement enrichi :
 - Compatible base neuve et ancienne base partiellement migrée.
 
 Vérification Railway :
-STARTING FINAL_COMPLETE_V23
+STARTING FINAL_COMPLETE_V24
 
 
 ## V22 - Correction complète SQL / hash / anti-repost
@@ -101,7 +101,7 @@ Important :
 - sinon V22 tente de réparer automatiquement le schéma.
 
 Vérification Railway :
-STARTING FINAL_COMPLETE_V23
+STARTING FINAL_COMPLETE_V24
 
 Test rapide :
 1. envoie une photo ;
@@ -128,4 +128,24 @@ Changements :
   - plus de spam mode raid.
 
 Vérification Railway :
-STARTING FINAL_COMPLETE_V23
+STARTING FINAL_COMPLETE_V24
+
+
+## V24 - Textes runtime corrigés
+
+La logique V23 est conservée. Cette version corrige les textes réellement utilisés par les handlers :
+
+- participation obligatoire ;
+- anti-repost ;
+- lien interdit ;
+- transfert interdit ;
+- mots interdits ;
+- fake commandes modération ;
+- avertissement non-participants ;
+- lien privé ;
+- récompense débloquée.
+
+Messages techniques masqués :
+- pas de mention hash en public ;
+- pas de message mode raid ;
+- pas de validation participation publique.

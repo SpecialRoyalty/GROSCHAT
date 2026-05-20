@@ -35,7 +35,7 @@ from telegram.ext import (
     filters,
 )
 
-APP_VERSION = "FINAL_COMPLETE_V23"
+APP_VERSION = "FINAL_COMPLETE_V24"
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 BOT_USERNAME = os.getenv("BOT_USERNAME", "").replace("@", "")
@@ -1347,9 +1347,9 @@ async def send_referral_link_private(update: Update, context: ContextTypes.DEFAU
             reward_url = row["url"] if row and row["url"] else ""
 
     txt = (
-        "🎁 Ton lien privé :\n\n"
+        MSG_PRIVATE_LINK_TITLE + "\n\n"
         f"{invite_link}\n\n"
-        "Règles :\n"
+        "Invitez des membres pour débloquer des récompenses.\n\nRègles :\n"
         "1 personne valide = 1 vidéo\n"
         "5 personnes valides = 10 vidéos\n"
         "30 personnes valides = 50 vidéos\n"
@@ -1415,7 +1415,7 @@ async def send_reward_link(context: ContextTypes.DEFAULT_TYPE, user_id: int, lev
     if not row or not row["url"]:
         return
     try:
-        await context.bot.send_message(user_id, f"🎁 Tu as débloqué le palier {level}/60 :\n{row['url']}")
+        await context.bot.send_message(user_id, f"{MSG_REWARD_UNLOCKED}\n{row['url']}")
     except Forbidden:
         print(f"Cannot send reward link to {user_id}: user did not start bot", flush=True)
     except Exception as e:
@@ -1528,6 +1528,33 @@ async def save_user_message_if_session(update: Update):
     )
 
 
+
+# =========================
+# PUBLIC MESSAGES V24
+# =========================
+
+MSG_PARTICIPATION_REQUIRED = "⚠️ Merci de participer avant d’envoyer un message.\nEnvoyez au moins 1 photo ou 1 vidéo jamais publiée."
+MSG_REPOST = "♻️ Ce média a déjà été publié."
+MSG_LINK_FORBIDDEN = "🔗 Les liens ne sont pas autorisés."
+MSG_FORWARD_FORBIDDEN = "🚫 Les transferts ne sont pas autorisés."
+MSG_GENERIC_FORBIDDEN = "🚫 Message non autorisé."
+MSG_FAKE_COMMAND = MSG_FAKE_COMMAND
+MSG_PRIVATE_LINK_TITLE = "🎁 Voici votre lien privé de parrainage."
+MSG_REWARD_UNLOCKED = "🎉 Récompense débloquée."
+
+def clean_public_reason(reason: str) -> str:
+    mapping = {
+        "lien interdit": MSG_LINK_FORBIDDEN,
+        "lien interdit": MSG_LINK_FORBIDDEN,
+        "transfert interdit": MSG_FORWARD_FORBIDDEN,
+        "transfert interdit": MSG_FORWARD_FORBIDDEN,
+        "mot interdit": MSG_GENERIC_FORBIDDEN,
+        "hash interdit": MSG_GENERIC_FORBIDDEN,
+        "photo avec identification interdite": MSG_GENERIC_FORBIDDEN,
+        "photo avec identification interdite": MSG_GENERIC_FORBIDDEN,
+    }
+    return mapping.get(reason, MSG_GENERIC_FORBIDDEN)
+
 async def punish_ban(update, context, reason):
     user = update.effective_user
     if not user:
@@ -1546,7 +1573,7 @@ async def punish_ban(update, context, reason):
 
     msg = await context.bot.send_message(
         update.effective_chat.id,
-        f"🚫 {user.mention_html()} a été banni pour {reason}. Ne faites pas la même erreur.",
+        clean_public_reason(reason),
         parse_mode="HTML",
     )
     await save_message(update.effective_chat.id, msg.message_id, None, True)
@@ -1582,7 +1609,7 @@ async def punish_word(update, context):
 
     msg = await context.bot.send_message(
         update.effective_chat.id,
-        f"🚫 {user.mention_html()} sanctionné : {action}. Respectez les règles.",
+        MSG_GENERIC_FORBIDDEN,
         parse_mode="HTML",
     )
     await save_message(update.effective_chat.id, msg.message_id, None, True)
@@ -1640,7 +1667,7 @@ async def handle_group_message(update: Update, context: ContextTypes.DEFAULT_TYP
 
     # 4) Anti-lien prioritaire : ban direct même si participation ON.
     if await get_setting("anti_links", "on") == "on" and URL_RE.search(text):
-        await punish_ban(update, context, "envoi de lien")
+        await punish_ban(update, context, "lien interdit")
         return
 
     # 5) Transferts interdits prioritaires.
@@ -1651,7 +1678,7 @@ async def handle_group_message(update: Update, context: ContextTypes.DEFAULT_TYP
         or getattr(msg, "forward_from_chat", None)
     )
     if is_forward:
-        await punish_ban(update, context, "transfert de message")
+        await punish_ban(update, context, "transfert interdit")
         return
 
     # 6) Photo + mention prioritaire.
@@ -1662,7 +1689,7 @@ async def handle_group_message(update: Update, context: ContextTypes.DEFAULT_TYP
             and any(e.type in ("mention", "text_mention") for e in msg.caption_entities)
         )
         if has_photo and has_mention:
-            await punish_ban(update, context, "photo avec identification")
+            await punish_ban(update, context, "photo avec identification interdite")
             return
 
     # 7) Hash média : ban hash puis anti-repost avant participation.
@@ -1682,7 +1709,7 @@ async def handle_group_message(update: Update, context: ContextTypes.DEFAULT_TYP
                 update,
                 context,
                 "hash interdit",
-                "🚫 Je viens de choper automatiquement une publication interdite ici."
+                MSG_GENERIC_FORBIDDEN
             )
             return
 
@@ -1699,10 +1726,10 @@ async def handle_group_message(update: Update, context: ContextTypes.DEFAULT_TYP
                 if await get_setting("participation", "off") == "on" and not await has_participated(user.id):
                     warn = await context.bot.send_message(
                         GROUP_ID,
-                        "♻️ Ce média a déjà été envoyé. Merci de participer avec un contenu nouveau."
+                        MSG_REPOST
                     )
                 else:
-                    warn = await context.bot.send_message(GROUP_ID, "♻️ C’est du vu et déjà vu.")
+                    warn = await context.bot.send_message(GROUP_ID, MSG_REPOST)
                 await save_message(GROUP_ID, warn.message_id, None, True)
                 await add_danger(user.id, 2, "repost média")
                 return
@@ -1731,7 +1758,7 @@ async def handle_group_message(update: Update, context: ContextTypes.DEFAULT_TYP
                 await send_temp_message(
                     context,
                     GROUP_ID,
-                    "Merci de participer avant d’envoyer un message.",
+                    MSG_PARTICIPATION_REQUIRED,
                     seconds=45
                 )
                 await add_danger(user.id, 1, "message avant participation")
@@ -1822,7 +1849,7 @@ async def warn_non_participants(context):
 
         txt = (
             "⚠️ Veuillez participer si vous voulez rester dans le groupe.\n"
-            "Envoyez au moins 1 photo ou 1 vidéo jamais déjà postée.\n\n"
+            "Envoyez au moins 1 photo ou 1 vidéo jamais publiée.\n\n"
             "✅ Une seule participation valide suffit pour rester définitivement.\n\n"
             "Si vous ne participez pas, vous serez supprimé du groupe sous peu.\n\n"
             f"🥾 Déjà supprimés pour non-participation : {kicked_total}\n"
