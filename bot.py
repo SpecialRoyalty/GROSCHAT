@@ -1,5 +1,5 @@
 
-# Horaires dynamiques V14
+# Horaires dynamiques V14b
 def get_schedule_for_day(now):
     wd = now.weekday()
 
