@@ -2079,13 +2079,11 @@ async def warn_non_participants(context):
                 mentions.append(f'<a href="tg://user?id={r["user_id"]}">{r["first_name"] or r["user_id"]}</a>')
 
         txt = (
-            "⚠️ Veuillez participer si vous voulez rester dans le groupe.\n"
-            "Envoyez au moins 1 photo ou 1 vidéo jamais publiée.\n\n"
-            "✅ Une seule participation valide suffit pour rester définitivement.\n\n"
-            "Si vous ne participez pas, vous serez supprimé du groupe sous peu.\n\n"
-            f"🥾 Déjà supprimés pour non-participation : {kicked_total}\n"
-            f"🥾 Kick automatique : {'ON' if kick_np == 'on' else 'OFF'}\n"
-            "Limite : 20 suppressions / jour\n\n"
+            "⚠️ Si vous êtes mentionné, vous n'avez jamais participé ⚠️.\n\n"
+            "Veuillez participer si vous voulez rester dans le groupe.\n\n"
+            "Envoyez au moins 1 photo ou 1 vidéo jamais publiée si vous voulez rester dans le groupe.\n\n"
+            "C'est un groupe de participation.\n\n"
+            "Vous serez jeté du groupe prochainement si vous ne participez pas.\n\n"
         )
         txt += " ".join(mentions)
 
