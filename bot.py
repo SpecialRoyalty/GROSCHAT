@@ -39,7 +39,7 @@ from telegram.ext import (
     filters,
 )
 
-APP_VERSION = "FINAL_COMPLETE_V37_GLOBAL_FIX"
+APP_VERSION = "FINAL_COMPLETE_V38_CALLBACK_FIX"
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 BOT_USERNAME = os.getenv("BOT_USERNAME", "").replace("@", "")
@@ -1082,14 +1082,35 @@ async def table_has_setting(key):
         return False
 
 
-async def safe_edit(query, text, reply_markup=None):
+
+async def safe_answer_callback(q):
     try:
-        await query.edit_message_text(text, reply_markup=reply_markup)
+        await safe_answer_callback(q)
     except BadRequest as e:
-        if "Message is not modified" in str(e):
-            await query.answer("Déjà à jour ✅")
-        else:
-            raise
+        if "Query is too old" in str(e) or "query id is invalid" in str(e):
+            print("CALLBACK ANSWER SKIPPED: old query", flush=True)
+            return
+        raise
+    except Exception as e:
+        print(f"CALLBACK ANSWER SKIPPED: {e}", flush=True)
+
+
+async def safe_edit(q, text, reply_markup=None):
+    try:
+        await q.edit_message_text(text, reply_markup=reply_markup)
+    except BadRequest as e:
+        s = str(e)
+        if (
+            "Message is not modified" in s
+            or "message to edit not found" in s.lower()
+            or "Query is too old" in s
+            or "query id is invalid" in s
+        ):
+            print(f"CALLBACK EDIT SKIPPED: {e}", flush=True)
+            return
+        raise
+    except Exception as e:
+        print(f"CALLBACK EDIT ERROR: {e}", flush=True)
 
 
 async def show_panel(query, extra=""):
@@ -1502,7 +1523,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def callbacks(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query
-    await q.answer()
+    await safe_answer_callback(q)
 
     if not q.from_user or not is_admin(q.from_user.id):
         return
@@ -1616,6 +1637,7 @@ async def callbacks(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         kb = InlineKeyboardMarkup([
             [InlineKeyboardButton("✏️ Texte", callback_data="campaign_set_text"), InlineKeyboardButton("🖼️ Image", callback_data="campaign_set_image")],
+            [InlineKeyboardButton("🎯 Objectif", callback_data="campaign_set_objective")],
             [InlineKeyboardButton("🔗 Nouveau lien GoFile", callback_data="campaign_set_link")],
             [InlineKeyboardButton("📣 Publier campagne", callback_data="publish_campaign_ad")],
             [InlineKeyboardButton("⬅️ Retour", callback_data="info")]
@@ -1631,6 +1653,11 @@ async def callbacks(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if data == "campaign_set_image":
         await set_admin_state(q.from_user.id, "campaign_set_image")
         await safe_edit(q, "🖼️ Envoie l'image de la campagne rediffusion.", reply_markup=back_keyboard())
+        return
+
+    if data == "campaign_set_objective":
+        await set_admin_state(q.from_user.id, "campaign_set_objective")
+        await safe_edit(q, "🎯 Envoie le nouvel objectif en nombre d'invitations validées. Exemple : 50", reply_markup=back_keyboard())
         return
 
     if data == "campaign_set_link":
@@ -1834,6 +1861,10 @@ async def publish_ad(context: ContextTypes.DEFAULT_TYPE):
 
     text = (
         "🎁 Partagez votre lien pour recevoir la rediffusion complète du groupe.\n\n"
+        "\n"
+        "\n"
+        "\n"
+        "\n\n"
         "Cliquez ci-dessous pour recevoir votre lien personnel."
     )
 
@@ -2006,6 +2037,25 @@ async def handle_private_admin(update: Update, context: ContextTypes.DEFAULT_TYP
             await con.execute("UPDATE reward_campaigns SET photo_file_id=$1, updated_at=NOW() WHERE active=TRUE", msg.photo[-1].file_id)
         await set_admin_state(user.id, None)
         await msg.reply_text("✅ Image campagne mise à jour.")
+        return
+
+    if state == "campaign_set_objective":
+        try:
+            objective = int(text)
+        except Exception:
+            await msg.reply_text("❌ Envoie un nombre valide. Exemple : 50")
+            return
+
+        if objective < 1 or objective > 10000:
+            await msg.reply_text("❌ Objectif invalide.")
+            return
+
+        await set_setting("campaign_default_objective", str(objective))
+        await ensure_active_campaign()
+        async with db_pool.acquire() as con:
+            await con.execute("UPDATE reward_campaigns SET objective=$1, updated_at=NOW() WHERE active=TRUE", objective)
+        await set_admin_state(user.id, None)
+        await msg.reply_text(f"✅ Objectif mis à jour : {objective} invitations validées.")
         return
 
     if state == "campaign_set_link":
