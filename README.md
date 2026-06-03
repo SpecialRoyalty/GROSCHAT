@@ -1,4 +1,4 @@
-# Telegram Railway Bot - FINAL_COMPLETE_V33_VIP_ADS
+# Telegram Railway Bot - FINAL_COMPLETE_V35_AUDIT_FIX
 
 Version cohérente nettoyée.
 
@@ -31,7 +31,7 @@ Version cohérente nettoyée.
 
 Dans les logs :
 
-STARTING FINAL_COMPLETE_V33_VIP_ADS
+STARTING FINAL_COMPLETE_V35_AUDIT_FIX
 
 Si tu vois encore `Vidéos : x/60`, c'est que Railway tourne encore sur une ancienne version.
 
@@ -79,7 +79,7 @@ Message d'avertissement enrichi :
 - Compatible base neuve et ancienne base partiellement migrée.
 
 Vérification Railway :
-STARTING FINAL_COMPLETE_V33_VIP_ADS
+STARTING FINAL_COMPLETE_V35_AUDIT_FIX
 
 
 ## V22 - Correction complète SQL / hash / anti-repost
@@ -101,7 +101,7 @@ Important :
 - sinon V22 tente de réparer automatiquement le schéma.
 
 Vérification Railway :
-STARTING FINAL_COMPLETE_V33_VIP_ADS
+STARTING FINAL_COMPLETE_V35_AUDIT_FIX
 
 Test rapide :
 1. envoie une photo ;
@@ -128,7 +128,7 @@ Changements :
   - plus de spam mode raid.
 
 Vérification Railway :
-STARTING FINAL_COMPLETE_V33_VIP_ADS
+STARTING FINAL_COMPLETE_V35_AUDIT_FIX
 
 
 ## V24 - Textes runtime corrigés
@@ -169,7 +169,7 @@ Correction incluse :
 - fix `MSG_FAKE_COMMAND` si la V24 contenait l'auto-référence cassée.
 
 Vérification Railway :
-STARTING FINAL_COMPLETE_V33_VIP_ADS
+STARTING FINAL_COMPLETE_V35_AUDIT_FIX
 
 
 ## V26 - Fix punish_ban + rapports admin
@@ -182,7 +182,7 @@ Corrections :
 - Transferts toujours autorisés comme en V25.
 
 Vérification Railway :
-STARTING FINAL_COMPLETE_V33_VIP_ADS
+STARTING FINAL_COMPLETE_V35_AUDIT_FIX
 
 
 ## V27 - Hash robuste + message dissuasion modération
@@ -201,7 +201,7 @@ Message dissuasion :
 - affiche suppressions, exclusions et restrictions.
 
 Vérification Railway :
-STARTING FINAL_COMPLETE_V33_VIP_ADS
+STARTING FINAL_COMPLETE_V35_AUDIT_FIX
 
 
 ## V28 - Fix trusted mute
@@ -214,7 +214,7 @@ Correction :
 - Un trusted qui utilise ces commandes n'est jamais mute par ce système.
 
 Vérification Railway :
-STARTING FINAL_COMPLETE_V33_VIP_ADS
+STARTING FINAL_COMPLETE_V35_AUDIT_FIX
 
 
 ## V29 - Priorité média interdit + trusted silencieux
@@ -230,7 +230,7 @@ Corrections :
 - `/supprimer` reste alias officiel de `/supprime`.
 
 Vérification Railway :
-STARTING FINAL_COMPLETE_V33_VIP_ADS
+STARTING FINAL_COMPLETE_V35_AUDIT_FIX
 
 
 ## V30_FRAMEHASH - Hash visuel photo + première frame vidéo
@@ -249,7 +249,7 @@ Dépendances ajoutées :
 - opencv-python-headless
 
 Vérification Railway :
-STARTING FINAL_COMPLETE_V33_VIP_ADS
+STARTING FINAL_COMPLETE_V35_AUDIT_FIX
 
 
 ## V31_PURGE - purge complète après média interdit
@@ -277,7 +277,7 @@ Rappels fermeture :
 - 5/4/3/2/1 minutes avant.
 
 Vérification Railway :
-STARTING FINAL_COMPLETE_V33_VIP_ADS
+STARTING FINAL_COMPLETE_V35_AUDIT_FIX
 
 ## V33_VIP_ADS
 
@@ -291,3 +291,34 @@ Ajouts :
 - Classement inviteurs ON/OFF.
 - Bouton `Mon lien` donne le lien unique en privé.
 - Compatible DB existante.
+
+
+## V34_REDIFFUSION
+
+Nouveau système récompense :
+- Objectif unique : 50 invitations validées.
+- Récompense : lien GoFile de la rediffusion complète.
+- Chaque nouveau lien GoFile crée une nouvelle campagne.
+- Les compteurs repartent à zéro pour la nouvelle campagne.
+- Les anciennes récompenses restent conservées dans `campaign_rewards`.
+- Pub Mon lien et Pub campagne sont coordonnées : même texte/image/bouton.
+
+Tables ajoutées non destructives :
+- reward_campaigns
+- campaign_rewards
+
+Base existante compatible.
+
+
+## V35_AUDIT_FIX
+
+Corrections après audit global :
+- ban automatique sur média interdit purge maintenant toute la session utilisateur ;
+- `/ban` trusted conservé : rapide, silencieux, purge + médias interdits ;
+- message participation obligatoire supprimé après 3 minutes ;
+- messages refus/limite trusted supprimés après 3 minutes ;
+- pas de modification SQL manuelle nécessaire.
+
+Base :
+- aucune table à supprimer ;
+- créations non destructives uniquement avec `CREATE TABLE IF NOT EXISTS` et `ALTER TABLE IF EXISTS ... ADD COLUMN IF NOT EXISTS`.
