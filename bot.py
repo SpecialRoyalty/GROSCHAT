@@ -39,7 +39,7 @@ from telegram.ext import (
     filters,
 )
 
-APP_VERSION = "FINAL_COMPLETE_V32_SCHEDULE_FIX"
+APP_VERSION = "FINAL_COMPLETE_V33_VIP_ADS"
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 BOT_USERNAME = os.getenv("BOT_USERNAME", "").replace("@", "")
@@ -276,6 +276,14 @@ async def init_db():
             "close_hour": "1",
             "current_session_id": "0",
             "ad_message_id": "0",
+            "ad1_enabled": "off",
+            "ad1_text": "",
+            "ad2_enabled": "off",
+            "ad2_text": "",
+            "share_ad_text": "🎁 Partagez le lien du groupe pour recevoir des récompenses.",
+            "share_ad_photo_file_id": "",
+            "leaderboard_enabled": "on",
+            "vip_min_invites": "40",
         }
 
         for k, v in defaults.items():
@@ -380,6 +388,9 @@ async def init_db():
             END IF;
         END $$;
         """)
+
+        await con.execute("ALTER TABLE IF EXISTS users ADD COLUMN IF NOT EXISTS vip_until TIMESTAMP")
+        await con.execute("ALTER TABLE IF EXISTS participants ADD COLUMN IF NOT EXISTS vip_until TIMESTAMP")
 
         tables = await con.fetch("""
         SELECT table_name FROM information_schema.tables
@@ -899,6 +910,9 @@ async def main_keyboard():
     participation = await get_setting("participation", "off")
     kick_np = await get_setting("kick_non_participants", "off")
     rules_auto = await get_setting("rules_auto", "off")
+    ad1_enabled = await get_setting("ad1_enabled", "off")
+    ad2_enabled = await get_setting("ad2_enabled", "off")
+    leaderboard_enabled = await get_setting("leaderboard_enabled", "on")
 
     links_ok = await reward_links_ready()
     pub_label = "📢 Publier publicité" if links_ok else "📢 Publicité bloquée : liens manquants"
@@ -923,6 +937,10 @@ async def main_keyboard():
         [InlineKeyboardButton("📣 Broadcast groupe", callback_data="broadcast_set")],
         [InlineKeyboardButton("🚫 Ban hash", callback_data="ban_hash_set")],
         [InlineKeyboardButton("🔗 Liens récompenses", callback_data="reward_links_menu")],
+        [InlineKeyboardButton(f"📢 Pub 1 {led(ad1_enabled)}", callback_data="toggle:ad1_enabled"), InlineKeyboardButton("✏️ Texte Pub 1", callback_data="set_ad1_text")],
+        [InlineKeyboardButton(f"📢 Pub 2 {led(ad2_enabled)}", callback_data="toggle:ad2_enabled"), InlineKeyboardButton("✏️ Texte Pub 2", callback_data="set_ad2_text")],
+        [InlineKeyboardButton("🖼️ Config pub Mon lien", callback_data="set_share_ad"), InlineKeyboardButton("📣 Publier Mon lien", callback_data="publish_share_ad")],
+        [InlineKeyboardButton(f"🏆 Classement {led(leaderboard_enabled)}", callback_data="toggle:leaderboard_enabled")],
         [InlineKeyboardButton(pub_label, callback_data="publish_ad" if links_ok else "publish_ad_locked")],
         [InlineKeyboardButton("📊 Stats parrainage", callback_data="ref_stats")],
         [InlineKeyboardButton("📣 Relancer non-participants", callback_data="warn_non_participants")],
@@ -1232,7 +1250,66 @@ async def trusted_ban(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await add_danger(target.id, 20, "trusted ban")
     await increment_ban_count()
     await increment_session_counter("session_exclusions")
+
+async def get_or_create_user_private_link(context: ContextTypes.DEFAULT_TYPE, user_id: int):
+    async with db_pool.acquire() as con:
+        row = await con.fetchrow("SELECT invite_link FROM referral_links WHERE user_id=$1", user_id)
+        if row and row["invite_link"]:
+            return row["invite_link"]
+
+    link = await context.bot.create_chat_invite_link(
+        GROUP_ID,
+        name=f"ref_{user_id}",
+        creates_join_request=False,
+    )
+
+    async with db_pool.acquire() as con:
+        await con.execute("""
+        INSERT INTO referral_links(user_id, invite_link, created_at)
+        VALUES($1,$2,NOW())
+        ON CONFLICT(user_id) DO UPDATE SET invite_link=$2
+        """, user_id, link.invite_link)
+
+    return link.invite_link
+
+
+async def build_referral_leaderboard_text(limit: int = 10):
+    async with db_pool.acquire() as con:
+        rows = await con.fetch("""
+        SELECT r.referrer_id, COUNT(*) AS total
+        FROM referrals r
+        WHERE r.validated_at IS NOT NULL
+        GROUP BY r.referrer_id
+        ORDER BY total DESC
+        LIMIT $1
+        """, limit)
+
+    if not rows:
+        return None
+
+    lines = ["🏆 Meilleurs partageurs", ""]
+    rank = 1
+    for r in rows:
+        uid = str(r["referrer_id"])
+        masked = uid[:2] + "****"
+        lines.append(f"{rank}. {masked} : {r['total']}")
+        rank += 1
+
+    lines.append("")
+    lines.append("Les meilleurs partageurs peuvent recevoir un VIP gratuit.")
+    return "\n".join(lines)
+
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    payload = context.args[0] if context.args else ""
+    if payload == "share":
+        user = update.effective_user
+        link = await get_or_create_user_private_link(context, user.id)
+        await update.message.reply_text(
+            f"🎁 Voici votre lien privé de parrainage.\n\n{link}\n\nInvitez des membres pour débloquer des récompenses."
+        )
+        return
+
     user = update.effective_user
     if not user:
         return
@@ -1333,6 +1410,26 @@ async def callbacks(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if data == "ban_hash_set":
         await set_admin_state(q.from_user.id, "ban_hash")
         await safe_edit(q, "🚫 Envoie maintenant la photo ou vidéo à bannir par hash.", reply_markup=back_keyboard())
+        return
+
+    if data == "set_ad1_text":
+        await set_admin_state(q.from_user.id, "set_ad1_text")
+        await safe_edit(q, "✏️ Envoie maintenant le texte de la Publicité 1.", reply_markup=back_keyboard())
+        return
+
+    if data == "set_ad2_text":
+        await set_admin_state(q.from_user.id, "set_ad2_text")
+        await safe_edit(q, "✏️ Envoie maintenant le texte de la Publicité 2.", reply_markup=back_keyboard())
+        return
+
+    if data == "set_share_ad":
+        await set_admin_state(q.from_user.id, "set_share_ad")
+        await safe_edit(q, "🖼️ Envoie maintenant la pub image avec son texte en légende. Le bouton sera : Mon lien.", reply_markup=back_keyboard())
+        return
+
+    if data == "publish_share_ad":
+        await publish_share_ad(context)
+        await safe_edit(q, await panel_text("Pub Mon lien publiée"), reply_markup=await main_keyboard())
         return
 
     if data == "reward_links_menu":
@@ -1710,6 +1807,32 @@ async def handle_private_admin(update: Update, context: ContextTypes.DEFAULT_TYP
         await msg.reply_text(f"✅ Lien palier {level} mis à jour.")
         return
 
+    if state == "set_ad1_text":
+        await set_setting("ad1_text", text)
+        await set_admin_state(user.id, None)
+        await msg.reply_text("✅ Texte Publicité 1 mis à jour.")
+        return
+
+    if state == "set_ad2_text":
+        await set_setting("ad2_text", text)
+        await set_admin_state(user.id, None)
+        await msg.reply_text("✅ Texte Publicité 2 mis à jour.")
+        return
+
+    if state == "set_share_ad":
+        caption = msg.caption or msg.text or ""
+        if msg.photo:
+            await set_setting("share_ad_photo_file_id", msg.photo[-1].file_id)
+            await set_setting("share_ad_text", caption)
+            await set_admin_state(user.id, None)
+            await msg.reply_text("✅ Pub image + bouton Mon lien enregistrée.")
+            return
+        if text:
+            await set_setting("share_ad_text", text)
+            await set_admin_state(user.id, None)
+            await msg.reply_text("✅ Texte pub Mon lien enregistré.")
+            return
+
     if state == "ban_hash":
         if not message_has_media(msg):
             await msg.reply_text("❌ Envoie une photo ou une vidéo.")
@@ -1762,6 +1885,68 @@ async def save_user_message_if_session(update: Update):
 
 
 
+
+async def trusted_pasfr(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    msg = update.message
+    actor = update.effective_user
+    if not msg or not actor:
+        return
+
+    if not is_trusted_id(actor.id):
+        await delete_message_safe(context, msg.chat_id, msg.message_id)
+        until = datetime.now(TZ) + timedelta(days=2)
+        try:
+            await context.bot.restrict_chat_member(
+                GROUP_ID,
+                actor.id,
+                ChatPermissions(can_send_messages=False),
+                until_date=until,
+            )
+            await increment_session_counter("session_mutes")
+        except Exception as e:
+            print(f"FAKE PASFR MUTE ERROR: {e}", flush=True)
+        try:
+            await send_temp_message(context, GROUP_ID, MSG_FAKE_COMMAND, seconds=180)
+        except Exception:
+            pass
+        return
+
+    if not msg.reply_to_message or not msg.reply_to_message.from_user:
+        await delete_message_safe(context, msg.chat_id, msg.message_id)
+        return
+
+    target = msg.reply_to_message.from_user
+    if await is_group_admin(context, target.id) or target.id in TRUSTED_IDS:
+        await delete_message_safe(context, msg.chat_id, msg.message_id)
+        return
+
+    await delete_message_safe(context, msg.chat_id, msg.reply_to_message.message_id)
+    await delete_message_safe(context, msg.chat_id, msg.message_id)
+    try:
+        await increment_session_counter("session_deletions")
+    except Exception:
+        pass
+
+    until = datetime.now(TZ) + timedelta(days=2)
+    try:
+        await context.bot.restrict_chat_member(
+            GROUP_ID,
+            target.id,
+            ChatPermissions(can_send_messages=False),
+            until_date=until,
+        )
+        await increment_session_counter("session_mutes")
+    except Exception as e:
+        print(f"PASFR MUTE ERROR: {e}", flush=True)
+
+    try:
+        await log_trusted_action(await get_session_for_trusted(), actor.id, "pasfr", target.id, msg.reply_to_message.message_id)
+    except Exception as e:
+        print(f"PASFR LOG ERROR: {e}", flush=True)
+
+    await send_temp_message(context, GROUP_ID, MSG_PASFR, seconds=180)
+
+
 # =========================
 # PUBLIC MESSAGES V24
 # =========================
@@ -1772,6 +1957,7 @@ MSG_LINK_FORBIDDEN = "🔗 Les liens ne sont pas autorisés."
 MSG_FORWARD_FORBIDDEN = "🚫 Les transferts ne sont pas autorisés."
 MSG_GENERIC_FORBIDDEN = "🚫 Message non autorisé."
 MSG_FAKE_COMMAND = "🔇 Commande réservée à la modération.\nSi vous essayez encore, vous serez banni."
+MSG_PASFR = "Je viens de restreindre une personne qui n’a pas envoyé du contenu FR, ne faites pas comme lui."
 MSG_PRIVATE_LINK_TITLE = "🎁 Voici votre lien privé de parrainage."
 MSG_REWARD_UNLOCKED = "🎉 Récompense débloquée."
 
@@ -1954,9 +2140,11 @@ async def handle_group_message(update: Update, context: ContextTypes.DEFAULT_TYP
                     await increment_session_counter("session_deletions")
                 except Exception:
                     pass
-                warn = await context.bot.send_message(
+                warn = await send_temp_message(
+                    context,
                     GROUP_ID,
-                    MSG_REPOST if "MSG_REPOST" in globals() else "♻️ Ce média a déjà été publié."
+                    MSG_REPOST if "MSG_REPOST" in globals() else "♻️ Ce média a déjà été publié.",
+                    seconds=180
                 )
                 await save_message(GROUP_ID, warn.message_id, None, True)
                 await add_danger(user.id, 2, "repost média")
@@ -2170,6 +2358,50 @@ async def kick_old_non_participants(context):
                 print(f"KICK REPORT SKIPPED admin={admin_id}: admin must start the bot in private first ({e})", flush=True)
 
 
+
+async def publish_share_ad(context: ContextTypes.DEFAULT_TYPE):
+    text = await get_setting("share_ad_text", "🎁 Partagez le lien du groupe pour recevoir des récompenses.")
+    photo_id = await get_setting("share_ad_photo_file_id", "")
+    url = f"https://t.me/{BOT_USERNAME}?start=share" if BOT_USERNAME else None
+    keyboard = InlineKeyboardMarkup([[InlineKeyboardButton("Mon lien", url=url)]]) if url else None
+
+    if photo_id:
+        msg = await context.bot.send_photo(GROUP_ID, photo_id, caption=text, reply_markup=keyboard)
+    else:
+        msg = await context.bot.send_message(GROUP_ID, text, reply_markup=keyboard)
+
+    await save_message(GROUP_ID, msg.message_id, None, True)
+    return msg
+
+
+async def auto_ads_job(context: ContextTypes.DEFAULT_TYPE):
+    if await get_setting("group_open", "off") != "on":
+        return
+
+    for key in ("ad1", "ad2"):
+        if await get_setting(f"{key}_enabled", "off") != "on":
+            continue
+        text = await get_setting(f"{key}_text", "")
+        if not text:
+            continue
+        msg = await context.bot.send_message(GROUP_ID, text)
+        await save_message(GROUP_ID, msg.message_id, None, True)
+        context.application.create_task(delete_later(context, GROUP_ID, msg.message_id, 180))
+
+
+async def leaderboard_job(context: ContextTypes.DEFAULT_TYPE):
+    if await get_setting("leaderboard_enabled", "on") != "on":
+        return
+    if await get_setting("group_open", "off") != "on":
+        return
+    text = await build_referral_leaderboard_text()
+    if not text:
+        return
+    msg = await context.bot.send_message(GROUP_ID, text)
+    await save_message(GROUP_ID, msg.message_id, None, True)
+    context.application.create_task(delete_later(context, GROUP_ID, msg.message_id, 180))
+
+
 async def post_rules(context):
     if await get_setting("rules_auto", "off") != "on":
         return
@@ -2357,6 +2589,8 @@ async def post_init(app):
     app.job_queue.run_repeating(post_rules, interval=15 * 60, first=90)
     app.job_queue.run_repeating(ban_report, interval=20 * 60, first=120)
     app.job_queue.run_repeating(kick_old_non_participants, interval=6 * 60 * 60, first=300)
+    app.job_queue.run_repeating(auto_ads_job, interval=10 * 60, first=240)
+    app.job_queue.run_repeating(leaderboard_job, interval=60 * 60, first=3600)
 
 
 async def error_handler(update, context):
@@ -2370,6 +2604,7 @@ def main():
     app.add_handler(CommandHandler("supprime", trusted_supprime, filters=filters.Chat(GROUP_ID)))
     app.add_handler(CommandHandler("supprimer", trusted_supprime, filters=filters.Chat(GROUP_ID)))
     app.add_handler(CommandHandler("ban", trusted_ban, filters=filters.Chat(GROUP_ID)))
+    app.add_handler(CommandHandler("pasfr", trusted_pasfr, filters=filters.Chat(GROUP_ID)))
     app.add_handler(CallbackQueryHandler(callbacks))
     app.add_handler(MessageHandler(filters.ChatType.PRIVATE, handle_private_admin))
     app.add_handler(MessageHandler(filters.Chat(GROUP_ID) & ~filters.COMMAND, handle_group_message))
