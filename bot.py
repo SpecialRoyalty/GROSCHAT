@@ -39,7 +39,7 @@ from telegram.ext import (
     filters,
 )
 
-APP_VERSION = "FINAL_COMPLETE_V45_SUPER_TRUSTED_PANEL_FIX"
+APP_VERSION = "FINAL_COMPLETE_V46_SECURITY_REWORK"
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 BOT_USERNAME = os.getenv("BOT_USERNAME", "").replace("@", "")
@@ -47,6 +47,7 @@ ADMIN_IDS = [int(x.strip()) for x in os.getenv("ADMIN_IDS", "").split(",") if x.
 TRUSTED_IDS = [int(x.strip()) for x in os.getenv("TRUSTED_IDS", "").split(",") if x.strip()]
 SUPER_TRUSTED_IDS = [int(x.strip()) for x in os.getenv("SUPER_TRUSTED_IDS", "").split(",") if x.strip()]
 GROUP_ID = int(os.getenv("GROUP_ID", "0"))
+REDIFFUSION_GROUP_ID = int(os.getenv("REDIFFUSION_GROUP_ID", "0") or "0")
 DATABASE_URL = os.getenv("DATABASE_URL")
 WEBHOOK_URL = os.getenv("WEBHOOK_URL")
 PORT = int(os.getenv("PORT", "8080"))
@@ -328,6 +329,7 @@ async def init_db():
             "share_ad_text": "🎁 Partagez votre lien pour recevoir la rediffusion complète du groupe.",
             "share_ad_photo_file_id": "",
             "leaderboard_enabled": "on",
+            "rediffusion_enabled": "off",
             "vip_min_invites": "40",
             "campaign_default_objective": "50",
         }
@@ -535,6 +537,10 @@ def is_super_trusted(user_id: int) -> bool:
 def is_trusted_or_super(user_id: int) -> bool:
     return user_id in TRUSTED_IDS or user_id in SUPER_TRUSTED_IDS or is_admin(user_id)
 
+def is_protected_user(user_id: int) -> bool:
+    return is_admin(user_id) or user_id in TRUSTED_IDS or user_id in SUPER_TRUSTED_IDS
+
+
 
 
 async def is_group_admin(context, user_id: int) -> bool:
@@ -642,42 +648,40 @@ async def _download_file_bytes_limited(context, file_id: str, purpose: str = "me
         return None
 
 
-def _first_frame_ahash_from_video_bytes(data: bytes) -> str | None:
-    """
-    V30_FRAMEHASH:
-    extrait la toute première frame réelle de la vidéo et calcule un aHash visuel.
-    C'est beaucoup plus fiable que SHA du fichier vidéo complet.
-    """
+def _first_last_frame_ahashes_from_video_bytes(data: bytes) -> list[str]:
     tmp_path = None
+    out = []
     try:
         with tempfile.NamedTemporaryFile(suffix=".mp4", delete=False) as tmp:
             tmp.write(data)
             tmp_path = tmp.name
-
         cap = cv2.VideoCapture(tmp_path)
         ok, frame = cap.read()
+        if ok and frame is not None:
+            ah = _average_hash_image(Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)))
+            if ah:
+                out.append("vidfirst:" + ah)
+        total = int(cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
+        if total > 1:
+            cap.set(cv2.CAP_PROP_POS_FRAMES, max(0, total - 1))
+            ok, frame = cap.read()
+            if ok and frame is not None:
+                ah = _average_hash_image(Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)))
+                if ah:
+                    out.append("vidlast:" + ah)
         cap.release()
-
-        if not ok or frame is None:
-            print("VIDEO FRAME HASH SKIPPED: first frame unavailable", flush=True)
-            return None
-
-        # OpenCV = BGR ; PIL = RGB
-        frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-        img = Image.fromarray(frame_rgb)
-        return _average_hash_image(img)
-
     except Exception as e:
-        print(f"VIDEO FRAME HASH SKIPPED: {e}", flush=True)
-        return None
+        print(f"VIDEO FIRST/LAST HASH SKIPPED: {e}", flush=True)
     finally:
         if tmp_path:
-            try:
-                os.remove(tmp_path)
-            except Exception:
-                pass
+            try: os.remove(tmp_path)
+            except Exception: pass
+    return list(dict.fromkeys(out))
 
 
+def _first_frame_ahash_from_video_bytes(data: bytes) -> str | None:
+    hashes = _first_last_frame_ahashes_from_video_bytes(data)
+    return hashes[0].split(":",1)[1] if hashes else None
 def _media_file_ids(msg):
     main_file_id = None
     unique_id = None
@@ -728,9 +732,13 @@ async def media_fingerprints_from_message(context, msg) -> list[str]:
 
     elif msg.video or msg.animation or msg.document:
         # Pour document .mp4/.mov envoyé comme fichier, on tente aussi vidéo.
-        vh = _first_frame_ahash_from_video_bytes(data)
-        if vh:
-            keys.insert(0, "vidframe0:" + vh)
+        video_hashes = _first_last_frame_ahashes_from_video_bytes(data)
+        for vh in reversed(video_hashes):
+            keys.insert(0, vh)
+        if not video_hashes:
+            vh = _first_frame_ahash_from_video_bytes(data)
+            if vh:
+                keys.insert(0, "vidframe0:" + vh)
 
     out = []
     seen = set()
@@ -761,7 +769,7 @@ async def find_matching_banned_media(keys: list[str]):
         # Matching approximatif pour hash visuel photo / première frame vidéo.
         visual_keys = []
         for k in keys:
-            if k.startswith("imgahash:") or k.startswith("vidframe0:"):
+            if k.startswith("imgahash:") or k.startswith("vidframe0:") or k.startswith("vidfirst:") or k.startswith("vidlast:"):
                 prefix, val = k.split(":", 1)
                 visual_keys.append((prefix, val))
 
@@ -791,7 +799,7 @@ async def find_matching_repost_media(keys: list[str]):
 
         visual_keys = []
         for k in keys:
-            if k.startswith("imgahash:") or k.startswith("vidframe0:"):
+            if k.startswith("imgahash:") or k.startswith("vidframe0:") or k.startswith("vidfirst:") or k.startswith("vidlast:"):
                 prefix, val = k.split(":", 1)
                 visual_keys.append((prefix, val))
 
@@ -994,6 +1002,9 @@ async def main_keyboard():
         [InlineKeyboardButton(f"📢 Pub 2 {led(ad2_enabled)}", callback_data="toggle:ad2_enabled"), InlineKeyboardButton("✏️ Texte Pub 2", callback_data="set_ad2_text")],
         [InlineKeyboardButton("📣 Publicité partage", callback_data="share_publicity_menu")],
         [InlineKeyboardButton("📢 Broadcast privé", callback_data="broadcast_private_set")],
+        [InlineKeyboardButton("👑 Grâce présidentielle", callback_data="grace_presidentielle")],
+        [InlineKeyboardButton("🏛️ Grâce ministérielle", callback_data="grace_ministerielle")],
+        [InlineKeyboardButton("📡 Rediffusion ON/OFF", callback_data="toggle_rediffusion")],
         [InlineKeyboardButton(f"🏆 Classement {led(leaderboard_enabled)}", callback_data="toggle:leaderboard_enabled")],
         [InlineKeyboardButton("📊 Stats parrainage", callback_data="ref_stats")],
         [InlineKeyboardButton("📣 Relancer non-participants", callback_data="warn_non_participants")],
@@ -1204,6 +1215,23 @@ async def ban_hashes_from_user_session(target_user_id: int):
     return len(rows)
 
 
+async def trusted_supprime_progressive(context, target_id:int):
+    if is_protected_user(target_id): return
+    async with db_pool.acquire() as con:
+        count=await con.fetchval("""
+        INSERT INTO user_violations(user_id, violation_type, count, updated_at)
+        VALUES($1,'trusted_supprime',1,NOW())
+        ON CONFLICT(user_id, violation_type) DO UPDATE SET count=user_violations.count+1, updated_at=NOW()
+        RETURNING count
+        """, target_id)
+    count=int(count or 1)
+    if count <= 1: return
+    days=max(1, min(count-1, 30))
+    try:
+        await restrict_user_days(context, target_id, days); await increment_session_counter("session_mutes")
+    except Exception as e: print(f"TRUSTED SUPPRIME PROGRESSIVE ERROR: {e}", flush=True)
+
+
 async def trusted_supprime(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = update.message
     actor = update.effective_user
@@ -1211,7 +1239,7 @@ async def trusted_supprime(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     if not is_trusted_or_super(actor.id):
-        await delete_message_safe(context, msg.chat_id, msg.message_id)
+        await fake_command_punish(update, context)
         return
 
     if not msg.reply_to_message or not msg.reply_to_message.from_user:
@@ -1270,7 +1298,7 @@ async def trusted_ban(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     if not is_trusted_or_super(actor.id):
-        await delete_message_safe(context, msg.chat_id, msg.message_id)
+        await fake_command_punish(update, context)
         return
 
     if not msg.reply_to_message or not msg.reply_to_message.from_user:
@@ -1297,7 +1325,7 @@ async def trusted_ban(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await log_trusted_action(sid, actor.id, "ban", target.id, msg.reply_to_message.message_id)
 
-    banned_hashes = await ban_hashes_from_user_session(target.id)
+    # /ban ne stocke pas les hash. Utiliser /pedo pour interdire les médias.
     deleted = await delete_user_session_messages(context, target.id)
 
     try:
@@ -1311,6 +1339,31 @@ async def trusted_ban(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await add_danger(target.id, 20, "trusted ban")
     await increment_ban_count()
     await increment_session_counter("session_exclusions")
+
+
+async def trusted_pedo(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    msg=update.message; actor=update.effective_user
+    if not msg or not actor: return
+    if not is_trusted_or_super(actor.id):
+        await fake_command_punish(update, context); return
+    if not msg.reply_to_message or not msg.reply_to_message.from_user:
+        await delete_message_safe(context,msg.chat_id,msg.message_id); return
+    target=msg.reply_to_message.from_user
+    if is_protected_user(target.id):
+        await delete_message_safe(context,msg.chat_id,msg.message_id)
+        await delete_user_session_messages(context,target.id)
+        return
+    sid=await get_session_for_trusted()
+    await log_trusted_action(sid, actor.id, "pedo", target.id, msg.reply_to_message.message_id)
+    await ban_hashes_from_user_session(target.id)
+    await delete_user_session_messages(context,target.id)
+    try:
+        await context.bot.ban_chat_member(GROUP_ID,target.id)
+        await increment_ban_count(); await increment_session_counter("session_exclusions")
+    except Exception as e: print(f"TRUSTED PEDO BAN ERROR: {e}", flush=True)
+    await delete_message_safe(context,msg.chat_id,msg.reply_to_message.message_id)
+    await delete_message_safe(context,msg.chat_id,msg.message_id)
+    await add_danger(target.id,30,"trusted pedo")
 
 
 async def ensure_active_campaign():
@@ -1972,6 +2025,30 @@ async def callbacks(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await safe_edit(q, await panel_text("Campagne publiée"), reply_markup=await main_keyboard())
         return
 
+    if data == "toggle_rediffusion":
+        current = await get_setting("rediffusion_enabled", "off")
+        if current != "on":
+            ok, msg = await validate_rediffusion_target(context)
+            if not ok:
+                await safe_edit(q, msg, reply_markup=await main_keyboard())
+                return
+            await set_setting("rediffusion_enabled", "on")
+            await safe_edit(q, "📡 Rediffusion : ON\nLes photos/vidéos seront copiées vers le groupe de vérification.", reply_markup=await main_keyboard())
+        else:
+            await set_setting("rediffusion_enabled", "off")
+            await safe_edit(q, "📡 Rediffusion : OFF\nAucun média ne sera copié.", reply_markup=await main_keyboard())
+        return
+
+    if data == "grace_presidentielle":
+        count = await grace_presidentielle(context)
+        await safe_edit(q, f"👑 Grâce présidentielle appliquée.\nPersonnes débannies : {count}\nLes hash interdits sont conservés.", reply_markup=await main_keyboard())
+        return
+
+    if data == "grace_ministerielle":
+        count = await grace_ministerielle(context)
+        await safe_edit(q, f"🏛️ Grâce ministérielle appliquée.\nRestrictions levées : {count}", reply_markup=await main_keyboard())
+        return
+
     if data == "share_publicity_menu":
         text = (
             "📣 PUBLICITÉ PARTAGE\n\n"
@@ -2426,164 +2503,192 @@ async def save_user_message_if_session(update: Update):
 
 
 async def trusted_pasfr(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    msg = update.message
-    actor = update.effective_user
-    if not msg or not actor:
-        return
-
+    msg=update.message; actor=update.effective_user
+    if not msg or not actor: return
     if not is_trusted_or_super(actor.id):
-        await delete_message_safe(context, msg.chat_id, msg.message_id)
-        until = datetime.now(TZ) + timedelta(days=2)
-        try:
-            await context.bot.restrict_chat_member(
-                GROUP_ID,
-                actor.id,
-                ChatPermissions(can_send_messages=False),
-                until_date=until,
-            )
-            await increment_session_counter("session_mutes")
-        except Exception as e:
-            print(f"FAKE PASFR MUTE ERROR: {e}", flush=True)
-        try:
-            await send_temp_message(context, GROUP_ID, MSG_FAKE_COMMAND, seconds=180)
-        except Exception:
-            pass
-        return
-
+        await fake_command_punish(update, context); return
     if not msg.reply_to_message or not msg.reply_to_message.from_user:
-        await delete_message_safe(context, msg.chat_id, msg.message_id)
-        return
+        await delete_message_safe(context,msg.chat_id,msg.message_id); return
+    target=msg.reply_to_message.from_user
+    await delete_message_safe(context,msg.chat_id,msg.reply_to_message.message_id)
+    await delete_message_safe(context,msg.chat_id,msg.message_id)
+    try: await increment_session_counter("session_deletions")
+    except Exception: pass
+    try: await log_trusted_action(await get_session_for_trusted(), actor.id, "pasfr", target.id, msg.reply_to_message.message_id)
+    except Exception as e: print(f"PASFR LOG ERROR: {e}", flush=True)
+    await send_public_warning(context, GROUP_ID, "⚠️ Merci d’envoyer uniquement du contenu FR.", seconds=180)
 
-    target = msg.reply_to_message.from_user
-    if await is_group_admin(context, target.id) or target.id in TRUSTED_IDS:
-        await delete_message_safe(context, msg.chat_id, msg.message_id)
-        return
+async def send_public_warning(context, chat_id: int, text: str, seconds: int = 180):
+    # silent_sanctions ON = messages visibles. OFF = silence total.
+    if await is_silent():
+        msg = await context.bot.send_message(chat_id, text, parse_mode="HTML")
+        await save_message(chat_id, msg.message_id, None, True)
+        context.application.create_task(delete_later(context, chat_id, msg.message_id, seconds))
+        return msg
+    return None
 
-    await delete_message_safe(context, msg.chat_id, msg.reply_to_message.message_id)
+
+def user_mention(user) -> str:
+    if getattr(user, "username", None):
+        return "@" + user.username
+    return f'<a href="tg://user?id={user.id}">{user.first_name or "membre"}</a>'
+
+
+async def restrict_user_days(context, user_id: int, days: int):
+    until = datetime.now(TZ) + timedelta(days=days)
+    await context.bot.restrict_chat_member(GROUP_ID, user_id, ChatPermissions(can_send_messages=False), until_date=until)
+
+
+async def unrestrict_user(context, user_id: int):
+    await context.bot.restrict_chat_member(
+        GROUP_ID, user_id,
+        ChatPermissions(can_send_messages=True, can_send_audios=True, can_send_documents=True, can_send_photos=True, can_send_videos=True, can_send_video_notes=True, can_send_voice_notes=True, can_send_polls=True, can_send_other_messages=True, can_add_web_page_previews=True, can_invite_users=True)
+    )
+
+
+async def fake_command_punish(update, context):
+    user = update.effective_user
+    msg = update.message
+    if not user or not msg:
+        return
     await delete_message_safe(context, msg.chat_id, msg.message_id)
+    if is_protected_user(user.id):
+        return
     try:
-        await increment_session_counter("session_deletions")
-    except Exception:
-        pass
-
-    until = datetime.now(TZ) + timedelta(days=2)
-    try:
-        await context.bot.restrict_chat_member(
-            GROUP_ID,
-            target.id,
-            ChatPermissions(can_send_messages=False),
-            until_date=until,
-        )
+        await restrict_user_days(context, user.id, 2)
         await increment_session_counter("session_mutes")
     except Exception as e:
-        print(f"PASFR MUTE ERROR: {e}", flush=True)
+        print(f"FAKE COMMAND MUTE ERROR: {e}", flush=True)
+    await send_public_warning(context, GROUP_ID, MSG_FAKE_COMMAND, seconds=180)
 
+
+async def grace_presidentielle(context):
+    async with db_pool.acquire() as con:
+        ids=set()
+        for table,col in [("danger_scores","user_id"),("user_violations","user_id"),("participants","user_id"),("messages","user_id")]:
+            try:
+                rows=await con.fetch(f"SELECT DISTINCT {col} AS user_id FROM {table} WHERE {col} IS NOT NULL")
+                ids.update(int(r["user_id"]) for r in rows if r["user_id"])
+            except Exception:
+                pass
+    count=0
+    for uid in ids:
+        if is_protected_user(uid):
+            continue
+        try:
+            await context.bot.unban_chat_member(GROUP_ID, uid, only_if_banned=True)
+            count+=1
+            await asyncio.sleep(0.03)
+        except Exception:
+            pass
+    return count
+
+
+async def grace_ministerielle(context):
+    async with db_pool.acquire() as con:
+        ids=set()
+        for table,col in [("danger_scores","user_id"),("user_violations","user_id"),("participants","user_id"),("messages","user_id")]:
+            try:
+                rows=await con.fetch(f"SELECT DISTINCT {col} AS user_id FROM {table} WHERE {col} IS NOT NULL")
+                ids.update(int(r["user_id"]) for r in rows if r["user_id"])
+            except Exception:
+                pass
+    count=0
+    for uid in ids:
+        if is_protected_user(uid):
+            continue
+        try:
+            await unrestrict_user(context, uid)
+            count+=1
+            await asyncio.sleep(0.03)
+        except Exception:
+            pass
+    return count
+
+
+async def validate_rediffusion_target(context):
+    if not REDIFFUSION_GROUP_ID:
+        return False, "❌ REDIFFUSION_GROUP_ID n’est pas configuré."
     try:
-        await log_trusted_action(await get_session_for_trusted(), actor.id, "pasfr", target.id, msg.reply_to_message.message_id)
+        me = await context.bot.get_me()
+        member = await context.bot.get_chat_member(REDIFFUSION_GROUP_ID, me.id)
+        if member.status in ("administrator", "creator"):
+            return True, "✅ Rediffusion connectée."
+        return False, "❌ Le bot doit être admin dans le groupe de rediffusion."
     except Exception as e:
-        print(f"PASFR LOG ERROR: {e}", flush=True)
-
-    await send_temp_message(context, GROUP_ID, MSG_PASFR, seconds=180)
+        return False, f"❌ Rediffusion non connectée : {e}"
 
 
-# =========================
-# PUBLIC MESSAGES V24
-# =========================
+async def rediffuse_media_if_enabled(update, context):
+    if await get_setting("rediffusion_enabled", "off") != "on":
+        return
+    msg = update.message
+    if not msg or not REDIFFUSION_GROUP_ID:
+        return
+    if not (msg.photo or msg.video):
+        return
+    try:
+        await context.bot.copy_message(chat_id=REDIFFUSION_GROUP_ID, from_chat_id=GROUP_ID, message_id=msg.message_id)
+    except Exception as e:
+        print(f"REDIFFUSION COPY ERROR: {e}", flush=True)
 
-MSG_PARTICIPATION_REQUIRED = "⚠️ Merci de participer avant d’envoyer un message."
-MSG_REPOST = "♻️ Ce média a déjà été publié."
-MSG_LINK_FORBIDDEN = "🔗 Les liens ne sont pas autorisés."
-MSG_FORWARD_FORBIDDEN = "🚫 Les transferts ne sont pas autorisés."
-MSG_GENERIC_FORBIDDEN = "🚫 Message non autorisé."
-MSG_FAKE_COMMAND = "🔇 Commande réservée à la modération.\nSi vous essayez encore, vous serez banni."
-MSG_PASFR = "Je viens de restreindre une personne qui n’a pas envoyé du contenu FR, ne faites pas comme lui."
-MSG_PRIVATE_LINK_TITLE = "🎁 Voici votre lien privé de parrainage."
-MSG_REWARD_UNLOCKED = "🎉 Récompense débloquée."
-
-def clean_public_reason(reason: str) -> str:
-    mapping = {
-        "lien interdit": MSG_LINK_FORBIDDEN,
-        "lien interdit": MSG_LINK_FORBIDDEN,
-        "transfert interdit": MSG_FORWARD_FORBIDDEN,
-        "transfert interdit": MSG_FORWARD_FORBIDDEN,
-        "mot interdit": MSG_GENERIC_FORBIDDEN,
-        "média interdit": MSG_GENERIC_FORBIDDEN,
-        "photo avec identification interdite": MSG_GENERIC_FORBIDDEN,
-        "photo avec identification interdite": MSG_GENERIC_FORBIDDEN,
-    }
-    return mapping.get(reason, MSG_GENERIC_FORBIDDEN)
 
 async def punish_ban(update, context, reason, custom_message=None):
     user = update.effective_user
     if not user:
         return
-
+    if is_protected_user(user.id):
+        try:
+            deleted = await delete_user_session_messages(context, user.id)
+            print(f"PROTECTED USER CONTENT PURGED ONLY: user={user.id} deleted={deleted}", flush=True)
+        except Exception as e:
+            print(f"PROTECTED PURGE ERROR: {e}", flush=True)
+        await delete_message_safe(context, update.effective_chat.id, update.message.message_id)
+        return
     try:
         await context.bot.ban_chat_member(update.effective_chat.id, user.id)
     except Exception as e:
         print(f"BAN ERROR: {e}", flush=True)
-
-    # V35 : purge complète de la session après ban automatique.
-    # Important pour média interdit : on ne laisse pas les anciens médias/messages visibles.
     try:
         deleted = await delete_user_session_messages(context, user.id)
         print(f"PURGE SESSION AFTER AUTO BAN: user={user.id} deleted={deleted}", flush=True)
     except Exception as e:
         print(f"PURGE SESSION AFTER AUTO BAN ERROR: {e}", flush=True)
-
     await delete_message_safe(context, update.effective_chat.id, update.message.message_id)
     await add_danger(user.id, 10, reason)
     await increment_ban_count()
     await increment_session_counter("session_exclusions")
-
-    if await is_silent():
-        return
-
-    msg = await send_temp_message(
-        context,
-        update.effective_chat.id,
-        custom_message or clean_public_reason(reason),
-        seconds=180,
-    )
-    await save_message(update.effective_chat.id, msg.message_id, None, True)
+    await send_public_warning(context, update.effective_chat.id, custom_message or clean_public_reason(reason), seconds=180)
 
 
 async def punish_word(update, context):
     user = update.effective_user
-    if not user:
+    msg = update.message
+    if not user or not msg:
         return
-
-    async with db_pool.acquire() as con:
-        row = await con.fetchrow("SELECT count FROM user_violations WHERE user_id=$1", user.id)
-        count = (row["count"] if row else 0) + 1
-        await con.execute("""
-        INSERT INTO user_violations(user_id,count,updated_at)
-        VALUES($1,$2,NOW())
-        ON CONFLICT(user_id) DO UPDATE SET count=$2, updated_at=NOW()
-        """, user.id, count)
-
-    await delete_message_safe(context, update.effective_chat.id, update.message.message_id)
-
-    if count == 1:
-        until = datetime.now(TZ) + timedelta(days=1)
-        await context.bot.restrict_chat_member(update.effective_chat.id, user.id, ChatPermissions(can_send_messages=False), until_date=until)
-        action = "mute 1 jour"
+    if is_protected_user(user.id):
+        return
+    await delete_message_safe(context, GROUP_ID, msg.message_id)
+    try:
+        days = 3 if not await has_participated(user.id) else 1
+    except Exception:
+        days = 3
+    try:
+        await restrict_user_days(context, user.id, days)
         await increment_session_counter("session_mutes")
-    elif count == 2:
-        until = datetime.now(TZ) + timedelta(days=7)
-        await context.bot.restrict_chat_member(update.effective_chat.id, user.id, ChatPermissions(can_send_messages=False), until_date=until)
-        action = "mute 1 semaine"
-        await increment_session_counter("session_mutes")
-    else:
-        await context.bot.ban_chat_member(update.effective_chat.id, user.id)
-        action = "ban"
+    except Exception as e:
+        print(f"WORD MUTE ERROR: {e}", flush=True)
+    await add_danger(user.id, 3, "mot interdit")
+    await send_public_warning(context, GROUP_ID, MSG_GENERIC_FORBIDDEN, seconds=180)
 
-    msg = await context.bot.send_message(
-        update.effective_chat.id,
-        MSG_GENERIC_FORBIDDEN,
-        parse_mode="HTML",
-    )
-    await save_message(update.effective_chat.id, msg.message_id, None, True)
+
+async def handle_group_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user=update.effective_user; msg=update.message
+    if not user or not msg: return
+    if is_protected_user(user.id): return
+    text=(msg.text or msg.caption or "").strip()
+    if text.startswith("/"):
+        await fake_command_punish(update, context)
 
 
 async def handle_group_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -2604,25 +2709,7 @@ async def handle_group_message(update: Update, context: ContextTypes.DEFAULT_TYP
     # 1) Commandes trusted /ban et /supprime sont traitées par CommandHandler avant ce handler.
     admin_exempt = await is_group_admin(context, user.id)
 
-    # 2) Les autres commandes / sont supprimées. Récidive = mute 1 mois.
-    if msg.text and msg.text.startswith("/") and not admin_exempt and not is_trusted_or_super(user.id):
-        await delete_message_safe(context, GROUP_ID, msg.message_id)
-        async with db_pool.acquire() as con:
-            row = await con.fetchrow("SELECT score FROM danger_scores WHERE user_id=$1", user.id)
-            score = row["score"] if row else 0
-        await add_danger(user.id, 2, "commande slash")
-        if score >= 2:
-            until = datetime.now(TZ) + timedelta(days=30)
-            try:
-                await context.bot.restrict_chat_member(
-                    GROUP_ID,
-                    user.id,
-                    ChatPermissions(can_send_messages=False),
-                    until_date=until
-                )
-            except Exception as e:
-                print(f"SLASH MUTE ERROR: {e}", flush=True)
-        return
+    # 2) Les autres commandes / sont traitées par handle_group_command.
 
     await upsert_participant(user)
     await save_user_message_if_session(update)
@@ -2664,6 +2751,15 @@ async def handle_group_message(update: Update, context: ContextTypes.DEFAULT_TYP
             await punish_ban(update, context, "photo avec identification interdite")
             return
 
+    # 6.5) Interdits critiques : bots, forwards/story/live.
+    if not is_protected_user(user.id):
+        if msg.forward_origin or msg.forward_from or msg.forward_from_chat:
+            await punish_ban(update, context, "transfert interdit", MSG_GENERIC_FORBIDDEN)
+            return
+        if msg.video_chat_started or msg.video_chat_scheduled or msg.video_chat_ended or msg.video_chat_participants_invited:
+            await punish_ban(update, context, "live interdit", MSG_GENERIC_FORBIDDEN)
+            return
+
     # 7) Empreintes média : média interdit avant repost simple.
     media_keys = []
     h = None
@@ -2690,13 +2786,14 @@ async def handle_group_message(update: Update, context: ContextTypes.DEFAULT_TYP
                     await increment_session_counter("session_deletions")
                 except Exception:
                     pass
-                warn = await send_temp_message(
+                warn = await send_public_warning(
                     context,
                     GROUP_ID,
                     MSG_REPOST if "MSG_REPOST" in globals() else "♻️ Ce média a déjà été publié.",
                     seconds=180
                 )
-                await save_message(GROUP_ID, warn.message_id, None, True)
+                if warn:
+                    await save_message(GROUP_ID, warn.message_id, None, True)
                 await add_danger(user.id, 2, "repost média")
                 return
 
@@ -2709,14 +2806,17 @@ async def handle_group_message(update: Update, context: ContextTypes.DEFAULT_TYP
             bool(message_is_photo_or_video(msg)),
         )
 
+        await rediffuse_media_if_enabled(update, context)
+
     # 8) Mots interdits.
-    async with db_pool.acquire() as con:
-        words = await con.fetch("SELECT word FROM banned_words")
-    for r in words:
-        word = r["word"].lower()
-        if word and re.search(rf"\b{re.escape(word)}\b", text, re.I):
-            await punish_word(update, context)
-            return
+    if not is_protected_user(user.id):
+        async with db_pool.acquire() as con:
+            words = await con.fetch("SELECT word FROM banned_words")
+        for r in words:
+            word = r["word"].lower()
+            if word and re.search(rf"\b{re.escape(word)}\b", text, re.I):
+                await punish_word(update, context)
+                return
 
     # 9) Participation obligatoire EN DERNIER.
     if await get_setting("participation", "off") == "on":
@@ -2727,8 +2827,8 @@ async def handle_group_message(update: Update, context: ContextTypes.DEFAULT_TYP
                 await send_temp_message(
                     context,
                     GROUP_ID,
-                    MSG_PARTICIPATION_REQUIRED,
-                    seconds=180
+                    MSG_PARTICIPATION_REQUIRED_MENTION.format(mention=user_mention(user)),
+                    seconds=10
                 )
                 await add_danger(user.id, 1, "message avant participation")
                 return
@@ -2819,8 +2919,11 @@ async def warn_non_participants(context):
         txt = (
             "⚠️ Veuillez participer si vous voulez rester dans le groupe.\n"
             "Envoyez au moins 1 photo ou 1 vidéo jamais publiée.\n\n"
-            "Sinon vous serez écarté du groupe.\n\n"
-
+            "✅ Une seule participation valide suffit pour rester définitivement.\n\n"
+            "Si vous ne participez pas, vous serez supprimé du groupe sous peu.\n\n"
+            f"🥾 Déjà supprimés pour non-participation : {kicked_total}\n"
+            f"🥾 Kick automatique : {'ON' if kick_np == 'on' else 'OFF'}\n"
+            "Limite : 20 suppressions / jour\n\n"
         )
         txt += " ".join(mentions)
 
@@ -3219,8 +3322,10 @@ def main():
     app.add_handler(CommandHandler("supprimer", trusted_supprime, filters=filters.Chat(GROUP_ID)))
     app.add_handler(CommandHandler("ban", trusted_ban, filters=filters.Chat(GROUP_ID)))
     app.add_handler(CommandHandler("pasfr", trusted_pasfr, filters=filters.Chat(GROUP_ID)))
+    app.add_handler(CommandHandler("pedo", trusted_pedo, filters=filters.Chat(GROUP_ID)))
     app.add_handler(CallbackQueryHandler(callbacks))
     app.add_handler(MessageHandler(filters.ChatType.PRIVATE, handle_private_admin))
+    app.add_handler(MessageHandler(filters.Chat(GROUP_ID) & filters.COMMAND, handle_group_command))
     app.add_handler(MessageHandler(filters.Chat(GROUP_ID) & ~filters.COMMAND, handle_group_message))
     app.add_handler(ChatMemberHandler(chat_member_update, ChatMemberHandler.CHAT_MEMBER))
     app.add_error_handler(error_handler)
