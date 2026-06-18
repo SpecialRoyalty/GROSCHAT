@@ -39,7 +39,7 @@ from telegram.ext import (
     filters,
 )
 
-APP_VERSION = "FINAL_COMPLETE_V46_SECURITY_REWORK"
+APP_VERSION = "FINAL_COMPLETE_V47_HARD_FILTERS"
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 BOT_USERNAME = os.getenv("BOT_USERNAME", "").replace("@", "")
@@ -109,6 +109,19 @@ async def init_db():
             created_at TIMESTAMP DEFAULT NOW()
         )
         """)
+        await con.execute("""
+        CREATE TABLE IF NOT EXISTS banned_words_hard(
+            word TEXT PRIMARY KEY,
+            created_at TIMESTAMP DEFAULT NOW()
+        )
+        """)
+        await con.execute("""
+        CREATE TABLE IF NOT EXISTS forbidden_usernames(
+            pattern TEXT PRIMARY KEY,
+            created_at TIMESTAMP DEFAULT NOW()
+        )
+        """)
+
         await con.execute("""
         CREATE TABLE IF NOT EXISTS banned_words(
             word TEXT PRIMARY KEY,
@@ -995,6 +1008,8 @@ async def main_keyboard():
             InlineKeyboardButton("🔴 Fermer + effacer", callback_data="close_group"),
         ],
         [InlineKeyboardButton("🚫 Mots interdits", callback_data="words_menu")],
+        [InlineKeyboardButton("⛔ Mots bannis", callback_data="hard_words_menu")],
+        [InlineKeyboardButton("👤 Usernames interdits", callback_data="forbidden_usernames_menu")],
         [InlineKeyboardButton("📌 Modifier règles", callback_data="rules_set")],
         [InlineKeyboardButton("📣 Broadcast groupe", callback_data="broadcast_set")],
         [InlineKeyboardButton("🚫 Ban hash", callback_data="ban_hash_set")],
@@ -1019,6 +1034,24 @@ async def words_keyboard():
             InlineKeyboardButton("➖ Supprimer un mot", callback_data="word_delete"),
         ],
         [InlineKeyboardButton("📋 Voir les mots", callback_data="word_list")],
+        [InlineKeyboardButton("⬅️ Retour", callback_data="info")],
+    ])
+
+
+async def hard_words_keyboard():
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("➕ Ajouter mot banni", callback_data="hard_word_add")],
+        [InlineKeyboardButton("➖ Supprimer mot banni", callback_data="hard_word_delete")],
+        [InlineKeyboardButton("📋 Voir mots bannis", callback_data="hard_word_list")],
+        [InlineKeyboardButton("⬅️ Retour", callback_data="info")],
+    ])
+
+
+async def forbidden_usernames_keyboard():
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("➕ Ajouter username interdit", callback_data="forbidden_username_add")],
+        [InlineKeyboardButton("➖ Supprimer username interdit", callback_data="forbidden_username_delete")],
+        [InlineKeyboardButton("📋 Voir usernames interdits", callback_data="forbidden_username_list")],
         [InlineKeyboardButton("⬅️ Retour", callback_data="info")],
     ])
 
@@ -1911,6 +1944,48 @@ async def callbacks(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await show_panel(q, f"session fermée, {deleted} messages supprimés")
         return
 
+    if data == "hard_words_menu":
+        await safe_edit(q, "⛔ MOTS BANNIS\n\nUn mot banni entraîne un ban direct.", reply_markup=await hard_words_keyboard())
+        return
+
+    if data == "hard_word_add":
+        await set_admin_state(q.from_user.id, "hard_word_add")
+        await safe_edit(q, "➕ Envoie le mot à bannir directement.", reply_markup=back_keyboard())
+        return
+
+    if data == "hard_word_delete":
+        await set_admin_state(q.from_user.id, "hard_word_delete")
+        await safe_edit(q, "➖ Envoie le mot banni à supprimer.", reply_markup=back_keyboard())
+        return
+
+    if data == "hard_word_list":
+        async with db_pool.acquire() as con:
+            rows = await con.fetch("SELECT word FROM banned_words_hard ORDER BY word ASC")
+        txt = "⛔ MOTS BANNIS\n\n" + ("\n".join([f"• {r['word']}" for r in rows]) if rows else "Aucun mot banni.")
+        await safe_edit(q, txt, reply_markup=await hard_words_keyboard())
+        return
+
+    if data == "forbidden_usernames_menu":
+        await safe_edit(q, "👤 USERNAMES INTERDITS\n\nSi le nom/username contient un motif, ban direct au join.", reply_markup=await forbidden_usernames_keyboard())
+        return
+
+    if data == "forbidden_username_add":
+        await set_admin_state(q.from_user.id, "forbidden_username_add")
+        await safe_edit(q, "➕ Envoie le motif username interdit. Exemple : cp", reply_markup=back_keyboard())
+        return
+
+    if data == "forbidden_username_delete":
+        await set_admin_state(q.from_user.id, "forbidden_username_delete")
+        await safe_edit(q, "➖ Envoie le motif username interdit à supprimer.", reply_markup=back_keyboard())
+        return
+
+    if data == "forbidden_username_list":
+        async with db_pool.acquire() as con:
+            rows = await con.fetch("SELECT pattern FROM forbidden_usernames ORDER BY pattern ASC")
+        txt = "👤 USERNAMES INTERDITS\n\n" + ("\n".join([f"• {r['pattern']}" for r in rows]) if rows else "Aucun motif.")
+        await safe_edit(q, txt, reply_markup=await forbidden_usernames_keyboard())
+        return
+
     if data == "words_menu":
         await safe_edit(q, "🚫 MOTS INTERDITS\n\nChoisis une action :", reply_markup=await words_keyboard())
         return
@@ -2318,6 +2393,44 @@ async def handle_private_admin(update: Update, context: ContextTypes.DEFAULT_TYP
         await msg.reply_text("✅ Mot interdit ajouté.")
         return
 
+    if state == "hard_word_add":
+        word = text.lower().strip()
+        if not word:
+            await msg.reply_text("❌ Mot vide.")
+            return
+        async with db_pool.acquire() as con:
+            await con.execute("INSERT INTO banned_words_hard(word,created_at) VALUES($1,NOW()) ON CONFLICT(word) DO NOTHING", word)
+        await set_admin_state(user.id, None)
+        await msg.reply_text("✅ Mot banni ajouté.")
+        return
+
+    if state == "hard_word_delete":
+        word = text.lower().strip()
+        async with db_pool.acquire() as con:
+            await con.execute("DELETE FROM banned_words_hard WHERE word=$1", word)
+        await set_admin_state(user.id, None)
+        await msg.reply_text("✅ Mot banni supprimé.")
+        return
+
+    if state == "forbidden_username_add":
+        pattern = text.lower().strip()
+        if not pattern:
+            await msg.reply_text("❌ Motif vide.")
+            return
+        async with db_pool.acquire() as con:
+            await con.execute("INSERT INTO forbidden_usernames(pattern,created_at) VALUES($1,NOW()) ON CONFLICT(pattern) DO NOTHING", pattern)
+        await set_admin_state(user.id, None)
+        await msg.reply_text("✅ Username interdit ajouté.")
+        return
+
+    if state == "forbidden_username_delete":
+        pattern = text.lower().strip()
+        async with db_pool.acquire() as con:
+            await con.execute("DELETE FROM forbidden_usernames WHERE pattern=$1", pattern)
+        await set_admin_state(user.id, None)
+        await msg.reply_text("✅ Username interdit supprimé.")
+        return
+
     if state == "adding_word":
         word = text.lower()
         if not word:
@@ -2661,6 +2774,61 @@ async def punish_ban(update, context, reason, custom_message=None):
     await send_public_warning(context, update.effective_chat.id, custom_message or clean_public_reason(reason), seconds=180)
 
 
+async def punish_media_mention_ad(update, context):
+    user = update.effective_user
+    msg = update.message
+    if not user or not msg:
+        return
+    if is_protected_user(user.id):
+        return
+    await delete_message_safe(context, GROUP_ID, msg.message_id)
+    async with db_pool.acquire() as con:
+        count = await con.fetchval("""
+        INSERT INTO user_violations(user_id, violation_type, count, updated_at)
+        VALUES($1,'media_mention_ad',1,NOW())
+        ON CONFLICT(user_id, violation_type)
+        DO UPDATE SET count=user_violations.count+1, updated_at=NOW()
+        RETURNING count
+        """, user.id)
+    days = max(1, min(int(count or 1), 30))
+    try:
+        await restrict_user_days(context, user.id, days)
+        await increment_session_counter("session_mutes")
+    except Exception as e:
+        print(f"MEDIA @ SANCTION ERROR: {e}", flush=True)
+    await add_danger(user.id, 4, "media avec mention pub")
+    await send_public_warning(context, GROUP_ID, "🚫 Tentative de publicité interdite.", seconds=180)
+
+
+async def username_is_forbidden(user) -> bool:
+    if not user or is_protected_user(user.id):
+        return False
+    parts = []
+    if getattr(user, "username", None): parts.append(user.username)
+    if getattr(user, "first_name", None): parts.append(user.first_name)
+    if getattr(user, "last_name", None): parts.append(user.last_name)
+    full = " ".join(parts).lower()
+    if not full:
+        return False
+    async with db_pool.acquire() as con:
+        rows = await con.fetch("SELECT pattern FROM forbidden_usernames")
+    return any((r["pattern"] or "").lower().strip() and (r["pattern"] or "").lower().strip() in full for r in rows)
+
+
+async def ban_for_forbidden_username(context, user):
+    if not user or is_protected_user(user.id):
+        return False
+    try:
+        await context.bot.ban_chat_member(GROUP_ID, user.id)
+        await increment_ban_count()
+        await increment_session_counter("session_exclusions")
+        await add_danger(user.id, 20, "username interdit")
+        return True
+    except Exception as e:
+        print(f"USERNAME BAN ERROR: {e}", flush=True)
+        return False
+
+
 async def punish_word(update, context):
     user = update.effective_user
     msg = update.message
@@ -2751,11 +2919,26 @@ async def handle_group_message(update: Update, context: ContextTypes.DEFAULT_TYP
             await punish_ban(update, context, "photo avec identification interdite")
             return
 
+    # 6.4) Média accompagné d'un texte contenant @ = tentative de pub.
+    if (msg.photo or msg.video) and (msg.caption or "") and "@" in msg.caption:
+        await punish_media_mention_ad(update, context)
+        return
+
+    # 6.3) new_chat_members username interdit.
+    if getattr(msg, "new_chat_members", None):
+        for joined_user in msg.new_chat_members:
+            if await username_is_forbidden(joined_user):
+                await ban_for_forbidden_username(context, joined_user)
+                return
+
     # 6.5) Interdits critiques : bots, forwards/story/live.
     if not is_protected_user(user.id):
         if msg.forward_origin or msg.forward_from or msg.forward_from_chat:
-            await punish_ban(update, context, "transfert interdit", MSG_GENERIC_FORBIDDEN)
-            return
+            # V47: forwards média autorisés. Forward texte/non-média reste interdit.
+            if not (msg.photo or msg.video):
+                await punish_ban(update, context, "transfert interdit", MSG_GENERIC_FORBIDDEN)
+                return
+
         if msg.video_chat_started or msg.video_chat_scheduled or msg.video_chat_ended or msg.video_chat_participants_invited:
             await punish_ban(update, context, "live interdit", MSG_GENERIC_FORBIDDEN)
             return
@@ -2808,6 +2991,16 @@ async def handle_group_message(update: Update, context: ContextTypes.DEFAULT_TYP
 
         await rediffuse_media_if_enabled(update, context)
 
+    # 7.9) Mots bannis : priorité absolue sur mots interdits, ban direct.
+    if not is_protected_user(user.id):
+        async with db_pool.acquire() as con:
+            hard_words = await con.fetch("SELECT word FROM banned_words_hard")
+        for r in hard_words:
+            word = (r["word"] or "").lower()
+            if word and re.search(rf"\b{re.escape(word)}\b", text, re.I):
+                await punish_ban(update, context, "mot banni", MSG_GENERIC_FORBIDDEN)
+                return
+
     # 8) Mots interdits.
     if not is_protected_user(user.id):
         async with db_pool.acquire() as con:
@@ -2841,6 +3034,15 @@ async def handle_group_message(update: Update, context: ContextTypes.DEFAULT_TYP
 
 
 async def chat_member_update(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # V47: username interdit au join => ban direct.
+    try:
+        joined_user = update.chat_member.new_chat_member.user
+        if await username_is_forbidden(joined_user):
+            await ban_for_forbidden_username(context, joined_user)
+            return
+    except Exception as e:
+        print(f"USERNAME JOIN CHECK ERROR: {e}", flush=True)
+
     cmu = update.chat_member
     if not cmu or cmu.chat.id != GROUP_ID:
         return
