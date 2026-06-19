@@ -39,7 +39,7 @@ from telegram.ext import (
     filters,
 )
 
-APP_VERSION = "FINAL_COMPLETE_V50_GRACE_FIX"
+APP_VERSION = "FINAL_COMPLETE_V52_GRACE_CONFIRM"
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 BOT_USERNAME = os.getenv("BOT_USERNAME", "").replace("@", "")
@@ -128,6 +128,16 @@ async def init_db():
             created_at TIMESTAMP DEFAULT NOW()
         )
         """)
+        await con.execute("""
+        CREATE TABLE IF NOT EXISTS restricted_users(
+            user_id BIGINT PRIMARY KEY,
+            reason TEXT,
+            restricted_until TIMESTAMP,
+            created_at TIMESTAMP DEFAULT NOW(),
+            updated_at TIMESTAMP DEFAULT NOW()
+        )
+        """)
+
         await con.execute("""
         CREATE TABLE IF NOT EXISTS user_violations(
             user_id BIGINT PRIMARY KEY,
@@ -2114,14 +2124,54 @@ async def callbacks(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await safe_edit(q, "📡 Rediffusion : OFF\nAucun média ne sera copié.", reply_markup=await main_keyboard())
         return
 
+    if data == "repair_v50":
+        ids = await repair_v50_candidates()
+        await safe_edit(
+            q,
+            f"🧯 Réparer restrictions V50\n\nUtilisateurs connus qui recevront les droits d’envoi : {len(ids)}\n\nÀ utiliser seulement si V50 a restreint trop de monde.\nVoulez-vous continuer ?",
+            reply_markup=grace_confirm_keyboard("confirm_repair_v50")
+        )
+        return
+
+    if data == "confirm_repair_v50":
+        count = await repair_v50_restrictions(context)
+        await safe_edit(q, f"🧯 Réparation V50 terminée.\nDroits rendus : {count}", reply_markup=await main_keyboard())
+        return
+
     if data == "grace_presidentielle":
+        ids = await grace_presidentielle_candidates()
+        await safe_edit(
+            q,
+            f"👑 Grâce présidentielle\n\nUtilisateurs connus à débannir : {len(ids)}\n\nLes hash interdits seront conservés.\nVoulez-vous continuer ?",
+            reply_markup=grace_confirm_keyboard("confirm_grace_presidentielle")
+        )
+        return
+
+    if data == "confirm_grace_presidentielle":
         count = await grace_presidentielle(context)
-        await safe_edit(q, f"👑 Grâce présidentielle appliquée.\nPersonnes débannies : {count}\nLes hash interdits sont conservés.", reply_markup=await main_keyboard())
+        await safe_edit(
+            q,
+            f"👑 Grâce présidentielle appliquée.\nPersonnes débannies : {count}\nLes hash interdits sont conservés.",
+            reply_markup=await main_keyboard()
+        )
         return
 
     if data == "grace_ministerielle":
+        ids = await grace_ministerielle_candidates()
+        await safe_edit(
+            q,
+            f"🏛️ Grâce ministérielle\n\nUtilisateurs actuellement suivis comme restreints : {len(ids)}\n\nAucun ban permanent ne sera débanni.\nVoulez-vous continuer ?",
+            reply_markup=grace_confirm_keyboard("confirm_grace_ministerielle")
+        )
+        return
+
+    if data == "confirm_grace_ministerielle":
         count = await grace_ministerielle(context)
-        await safe_edit(q, f"🏛️ Grâce ministérielle appliquée.\nRestrictions/mutes levés : {count}\nAucun ban permanent débanni.", reply_markup=await main_keyboard())
+        await safe_edit(
+            q,
+            f"🏛️ Grâce ministérielle appliquée.\nRestrictions/mutes suivis levés : {count}\nAucun ban permanent débanni.",
+            reply_markup=await main_keyboard()
+        )
         return
 
     if data == "share_publicity_menu":
@@ -2647,14 +2697,30 @@ def user_mention(user) -> str:
     return f'<a href="tg://user?id={user.id}">{user.first_name or "membre"}</a>'
 
 
-async def restrict_user_days(context, user_id: int, days: int):
+async def restrict_user_days(context, user_id: int, days: int, reason: str = "restriction"):
     until = datetime.now(TZ) + timedelta(days=days)
-    await context.bot.restrict_chat_member(GROUP_ID, user_id, ChatPermissions(can_send_messages=False), until_date=until)
+    await context.bot.restrict_chat_member(
+        GROUP_ID,
+        user_id,
+        ChatPermissions(can_send_messages=False),
+        until_date=until,
+    )
+    try:
+        async with db_pool.acquire() as con:
+            await con.execute("""
+            INSERT INTO restricted_users(user_id,reason,restricted_until,created_at,updated_at)
+            VALUES($1,$2,$3,NOW(),NOW())
+            ON CONFLICT(user_id) DO UPDATE SET
+                reason=$2,
+                restricted_until=$3,
+                updated_at=NOW()
+            """, user_id, reason, until.replace(tzinfo=None))
+    except Exception as e:
+        print(f"RESTRICTED_USERS TRACK ERROR user={user_id}: {e}", flush=True)
 
 
 async def unrestrict_user(context, user_id: int):
-    # V50 : grâce ministérielle = lever les restrictions.
-    # On remet explicitement tous les droits d'envoi possibles.
+    # V51 : lève uniquement une restriction connue/suivie.
     permissions = ChatPermissions(
         can_send_messages=True,
         can_send_audios=True,
@@ -2679,15 +2745,16 @@ async def unrestrict_user(context, user_id: int):
             permissions=permissions,
             until_date=None,
         )
-        return True
     except TypeError:
-        # Compatibilité anciennes versions PTB.
-        await context.bot.restrict_chat_member(
-            GROUP_ID,
-            user_id,
-            permissions,
-        )
-        return True
+        await context.bot.restrict_chat_member(GROUP_ID, user_id, permissions)
+
+    try:
+        async with db_pool.acquire() as con:
+            await con.execute("DELETE FROM restricted_users WHERE user_id=$1", user_id)
+    except Exception as e:
+        print(f"RESTRICTED_USERS DELETE ERROR user={user_id}: {e}", flush=True)
+
+    return True
 
 
 async def fake_command_punish(update, context):
@@ -2704,6 +2771,70 @@ async def fake_command_punish(update, context):
     except Exception as e:
         print(f"FAKE COMMAND MUTE ERROR: {e}", flush=True)
     await send_public_warning(context, GROUP_ID, MSG_FAKE_COMMAND, seconds=180)
+
+
+async def grace_presidentielle(context):
+    ids = await grace_presidentielle_candidates()
+    count = 0
+    for uid in ids:
+        try:
+            await context.bot.unban_chat_member(GROUP_ID, uid, only_if_banned=True)
+            count += 1
+            await asyncio.sleep(0.03)
+        except Exception:
+            pass
+    return count
+
+
+async def grace_ministerielle(context):
+    ids = await grace_ministerielle_candidates()
+    count = 0
+    for uid in ids:
+        try:
+            ok = await unrestrict_user(context, uid)
+            if ok:
+                count += 1
+            await asyncio.sleep(0.03)
+        except Exception as e:
+            print(f"GRACE MINISTERIELLE UNRESTRICT ERROR user={uid}: {e}", flush=True)
+    return count
+
+
+async def repair_v50_candidates():
+    async with db_pool.acquire() as con:
+        ids = set()
+        for table, col in [
+            ("danger_scores", "user_id"),
+            ("user_violations", "user_id"),
+            ("participants", "user_id"),
+            ("messages", "user_id"),
+        ]:
+            try:
+                rows = await con.fetch(f"SELECT DISTINCT {col} AS user_id FROM {table} WHERE {col} IS NOT NULL")
+                ids.update(int(r["user_id"]) for r in rows if r["user_id"])
+            except Exception:
+                pass
+    return sorted([uid for uid in ids if not is_protected_user(uid)])
+
+
+def grace_confirm_keyboard(confirm_callback: str):
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("✅ Confirmer", callback_data=confirm_callback)],
+        [InlineKeyboardButton("❌ Annuler", callback_data="info")],
+    ])
+
+
+async def repair_v50_restrictions(context):
+    ids = await repair_v50_candidates()
+    count = 0
+    for uid in ids:
+        try:
+            await unrestrict_user(context, uid)
+            count += 1
+            await asyncio.sleep(0.03)
+        except Exception as e:
+            print(f"REPAIR V50 ERROR user={uid}: {e}", flush=True)
+    return count
 
 
 async def grace_presidentielle(context):
@@ -2729,23 +2860,18 @@ async def grace_presidentielle(context):
 
 
 async def grace_ministerielle(context):
-    # Rétroactif pour les personnes connues en base : retire les restrictions/mutes.
+    # V51 : ne parcourt plus tous les utilisateurs connus.
+    # Elle libère uniquement les utilisateurs que le bot a lui-même enregistrés comme restreints.
     async with db_pool.acquire() as con:
-        ids = set()
-        for table, col in [
-            ("danger_scores", "user_id"),
-            ("user_violations", "user_id"),
-            ("participants", "user_id"),
-            ("messages", "user_id"),
-        ]:
-            try:
-                rows = await con.fetch(f"SELECT DISTINCT {col} AS user_id FROM {table} WHERE {col} IS NOT NULL")
-                ids.update(int(r["user_id"]) for r in rows if r["user_id"])
-            except Exception:
-                pass
+        rows = await con.fetch("""
+        SELECT user_id
+        FROM restricted_users
+        WHERE user_id IS NOT NULL
+        """)
 
     count = 0
-    for uid in ids:
+    for r in rows:
+        uid = int(r["user_id"])
         if is_protected_user(uid):
             continue
         try:
