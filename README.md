@@ -1,4 +1,4 @@
-# Telegram Railway Bot - FINAL_COMPLETE_V57_WORD_BOUNDARY_FIX
+# Telegram Railway Bot - FINAL_COMPLETE_V58_HASH_RESTORE
 
 Version cohérente nettoyée.
 
@@ -31,7 +31,7 @@ Version cohérente nettoyée.
 
 Dans les logs :
 
-STARTING FINAL_COMPLETE_V57_WORD_BOUNDARY_FIX
+STARTING FINAL_COMPLETE_V58_HASH_RESTORE
 
 Si tu vois encore `Vidéos : x/60`, c'est que Railway tourne encore sur une ancienne version.
 
@@ -79,7 +79,7 @@ Message d'avertissement enrichi :
 - Compatible base neuve et ancienne base partiellement migrée.
 
 Vérification Railway :
-STARTING FINAL_COMPLETE_V57_WORD_BOUNDARY_FIX
+STARTING FINAL_COMPLETE_V58_HASH_RESTORE
 
 
 ## V22 - Correction complète SQL / hash / anti-repost
@@ -101,7 +101,7 @@ Important :
 - sinon V22 tente de réparer automatiquement le schéma.
 
 Vérification Railway :
-STARTING FINAL_COMPLETE_V57_WORD_BOUNDARY_FIX
+STARTING FINAL_COMPLETE_V58_HASH_RESTORE
 
 Test rapide :
 1. envoie une photo ;
@@ -128,7 +128,7 @@ Changements :
   - plus de spam mode raid.
 
 Vérification Railway :
-STARTING FINAL_COMPLETE_V57_WORD_BOUNDARY_FIX
+STARTING FINAL_COMPLETE_V58_HASH_RESTORE
 
 
 ## V24 - Textes runtime corrigés
@@ -169,7 +169,7 @@ Correction incluse :
 - fix `MSG_FAKE_COMMAND` si la V24 contenait l'auto-référence cassée.
 
 Vérification Railway :
-STARTING FINAL_COMPLETE_V57_WORD_BOUNDARY_FIX
+STARTING FINAL_COMPLETE_V58_HASH_RESTORE
 
 
 ## V26 - Fix punish_ban + rapports admin
@@ -182,7 +182,7 @@ Corrections :
 - Transferts toujours autorisés comme en V25.
 
 Vérification Railway :
-STARTING FINAL_COMPLETE_V57_WORD_BOUNDARY_FIX
+STARTING FINAL_COMPLETE_V58_HASH_RESTORE
 
 
 ## V27 - Hash robuste + message dissuasion modération
@@ -201,7 +201,7 @@ Message dissuasion :
 - affiche suppressions, exclusions et restrictions.
 
 Vérification Railway :
-STARTING FINAL_COMPLETE_V57_WORD_BOUNDARY_FIX
+STARTING FINAL_COMPLETE_V58_HASH_RESTORE
 
 
 ## V28 - Fix trusted mute
@@ -214,7 +214,7 @@ Correction :
 - Un trusted qui utilise ces commandes n'est jamais mute par ce système.
 
 Vérification Railway :
-STARTING FINAL_COMPLETE_V57_WORD_BOUNDARY_FIX
+STARTING FINAL_COMPLETE_V58_HASH_RESTORE
 
 
 ## V29 - Priorité média interdit + trusted silencieux
@@ -230,7 +230,7 @@ Corrections :
 - `/supprimer` reste alias officiel de `/supprime`.
 
 Vérification Railway :
-STARTING FINAL_COMPLETE_V57_WORD_BOUNDARY_FIX
+STARTING FINAL_COMPLETE_V58_HASH_RESTORE
 
 
 ## V30_FRAMEHASH - Hash visuel photo + première frame vidéo
@@ -249,7 +249,7 @@ Dépendances ajoutées :
 - opencv-python-headless
 
 Vérification Railway :
-STARTING FINAL_COMPLETE_V57_WORD_BOUNDARY_FIX
+STARTING FINAL_COMPLETE_V58_HASH_RESTORE
 
 
 ## V31_PURGE - purge complète après média interdit
@@ -277,7 +277,7 @@ Rappels fermeture :
 - 5/4/3/2/1 minutes avant.
 
 Vérification Railway :
-STARTING FINAL_COMPLETE_V57_WORD_BOUNDARY_FIX
+STARTING FINAL_COMPLETE_V58_HASH_RESTORE
 
 ## V33_VIP_ADS
 
@@ -528,3 +528,11 @@ Correction :
 - Exemple : `hi` ne bannit plus `Mathias`.
 - `hi` continue à matcher `hi`, `hi_123`, `hello-hi`, `hi.test`.
 - même logique appliquée aux mots bannis.
+
+## V58_HASH_RESTORE
+
+Correction critique :
+- restaure la vérification `banned_hashes` dans `handle_group_message`;
+- `banned_hashes` est vérifié avant `media_hashes`;
+- média interdit => ban direct pour membre normal;
+- trusted/admin/super trusted protégés : contenu supprimé/purgé, pas de ban.

@@ -39,7 +39,7 @@ from telegram.ext import (
     filters,
 )
 
-APP_VERSION = "FINAL_COMPLETE_V57_WORD_BOUNDARY_FIX"
+APP_VERSION = "FINAL_COMPLETE_V58_HASH_RESTORE"
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 BOT_USERNAME = os.getenv("BOT_USERNAME", "").replace("@", "")
@@ -3023,6 +3023,27 @@ async def handle_group_message(update: Update, context: ContextTypes.DEFAULT_TYP
         h = media_keys[0] if media_keys else None
 
     if media_keys:
+        # V58 banned_hashes priority check.
+        # Must be checked BEFORE media_hashes/repost.
+        async with db_pool.acquire() as con:
+            banned_rows = await con.fetch(
+                "SELECT hash FROM banned_hashes WHERE hash = ANY($1::text[])",
+                media_keys,
+            )
+
+        if banned_rows:
+            if is_protected_user(user.id):
+                await delete_message_safe(context, GROUP_ID, msg.message_id)
+                try:
+                    await delete_user_session_messages(context, user.id)
+                except Exception as e:
+                    print(f"PROTECTED BANNED HASH PURGE ERROR: {e}", flush=True)
+                return
+
+            await punish_ban(update, context, "média interdit", MSG_GENERIC_FORBIDDEN)
+            return
+
+
         banned_match = await find_matching_banned_media(media_keys)
         if banned_match:
             await punish_ban(
