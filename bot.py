@@ -39,7 +39,7 @@ from telegram.ext import (
     filters,
 )
 
-APP_VERSION = "FINAL_COMPLETE_V48_FORWARD_FIX"
+APP_VERSION = "FINAL_COMPLETE_V49_ADMIN_ALERTS"
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 BOT_USERNAME = os.getenv("BOT_USERNAME", "").replace("@", "")
@@ -2815,6 +2815,49 @@ async def username_is_forbidden(user) -> bool:
     return any((r["pattern"] or "").lower().strip() and (r["pattern"] or "").lower().strip() in full for r in rows)
 
 
+async def display_user_for_alert(user):
+    if not user:
+        return "Utilisateur inconnu"
+    username = getattr(user, "username", None)
+    if username:
+        return f"@{username}"
+    first = getattr(user, "first_name", None) or ""
+    last = getattr(user, "last_name", None) or ""
+    name = (first + " " + last).strip()
+    return name or "Utilisateur inconnu"
+
+
+async def notify_admins_supertrusted(context, text: str):
+    recipients = set()
+    try:
+        recipients.update(ADMIN_IDS)
+    except Exception:
+        pass
+    try:
+        recipients.update(SUPER_TRUSTED_IDS)
+    except Exception:
+        pass
+
+    for uid in recipients:
+        try:
+            await context.bot.send_message(uid, text)
+        except Exception as e:
+            print(f"ADMIN ALERT SEND ERROR user={uid}: {e}", flush=True)
+
+
+async def alert_auto_ban(context, user, reason: str, detected: str | None = None):
+    display = await display_user_for_alert(user)
+    detected_line = f"\nÉlément détecté : {detected}" if detected else ""
+    text = (
+        "🚨 Ban automatique\n\n"
+        f"Motif : {reason}\n"
+        f"Utilisateur : {display}"
+        f"{detected_line}\n"
+        "Action : ban direct"
+    )
+    await notify_admins_supertrusted(context, text)
+
+
 async def ban_for_forbidden_username(context, user):
     if not user or is_protected_user(user.id):
         return False
@@ -2840,6 +2883,7 @@ async def ban_for_forbidden_username(context, user):
         await increment_ban_count()
         await increment_session_counter("session_exclusions")
         await add_danger(user.id, 20, f"username interdit:{matched_pattern}")
+        await alert_auto_ban(context, user, "username interdit", matched_pattern)
         return True
     except Exception as e:
         print(f"USERNAME BAN ERROR: {e}", flush=True)
@@ -3016,6 +3060,7 @@ async def handle_group_message(update: Update, context: ContextTypes.DEFAULT_TYP
             word = (r["word"] or "").lower()
             if word and re.search(rf"\b{re.escape(word)}\b", text, re.I):
                 await punish_ban(update, context, "mot banni", MSG_GENERIC_FORBIDDEN)
+                await alert_auto_ban(context, user, "mot banni dans le message", word)
                 return
 
     # 8) Mots interdits.
