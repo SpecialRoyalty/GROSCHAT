@@ -39,7 +39,7 @@ from telegram.ext import (
     filters,
 )
 
-APP_VERSION = "FINAL_COMPLETE_V52_GRACE_CONFIRM"
+APP_VERSION = "FINAL_COMPLETE_V53_GRACE_CONFIRM_FIX"
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 BOT_USERNAME = os.getenv("BOT_USERNAME", "").replace("@", "")
@@ -2110,34 +2110,6 @@ async def callbacks(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await safe_edit(q, await panel_text("Campagne publiée"), reply_markup=await main_keyboard())
         return
 
-    if data == "toggle_rediffusion":
-        current = await get_setting("rediffusion_enabled", "off")
-        if current != "on":
-            ok, msg = await validate_rediffusion_target(context)
-            if not ok:
-                await safe_edit(q, msg, reply_markup=await main_keyboard())
-                return
-            await set_setting("rediffusion_enabled", "on")
-            await safe_edit(q, "📡 Rediffusion : ON\nLes photos/vidéos seront copiées vers le groupe de vérification.", reply_markup=await main_keyboard())
-        else:
-            await set_setting("rediffusion_enabled", "off")
-            await safe_edit(q, "📡 Rediffusion : OFF\nAucun média ne sera copié.", reply_markup=await main_keyboard())
-        return
-
-    if data == "repair_v50":
-        ids = await repair_v50_candidates()
-        await safe_edit(
-            q,
-            f"🧯 Réparer restrictions V50\n\nUtilisateurs connus qui recevront les droits d’envoi : {len(ids)}\n\nÀ utiliser seulement si V50 a restreint trop de monde.\nVoulez-vous continuer ?",
-            reply_markup=grace_confirm_keyboard("confirm_repair_v50")
-        )
-        return
-
-    if data == "confirm_repair_v50":
-        count = await repair_v50_restrictions(context)
-        await safe_edit(q, f"🧯 Réparation V50 terminée.\nDroits rendus : {count}", reply_markup=await main_keyboard())
-        return
-
     if data == "grace_presidentielle":
         ids = await grace_presidentielle_candidates()
         await safe_edit(
@@ -2172,6 +2144,34 @@ async def callbacks(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"🏛️ Grâce ministérielle appliquée.\nRestrictions/mutes suivis levés : {count}\nAucun ban permanent débanni.",
             reply_markup=await main_keyboard()
         )
+        return
+
+    if data == "repair_v50":
+        ids = await repair_v50_candidates()
+        await safe_edit(
+            q,
+            f"🧯 Réparer restrictions V50\n\nUtilisateurs connus qui recevront les droits d’envoi : {len(ids)}\n\nÀ utiliser seulement si V50 a restreint trop de monde.\nVoulez-vous continuer ?",
+            reply_markup=grace_confirm_keyboard("confirm_repair_v50")
+        )
+        return
+
+    if data == "confirm_repair_v50":
+        count = await repair_v50_restrictions(context)
+        await safe_edit(q, f"🧯 Réparation V50 terminée.\nDroits rendus : {count}", reply_markup=await main_keyboard())
+        return
+
+    if data == "toggle_rediffusion":
+        current = await get_setting("rediffusion_enabled", "off")
+        if current != "on":
+            ok, msg = await validate_rediffusion_target(context)
+            if not ok:
+                await safe_edit(q, msg, reply_markup=await main_keyboard())
+                return
+            await set_setting("rediffusion_enabled", "on")
+            await safe_edit(q, "📡 Rediffusion : ON\nLes photos/vidéos seront copiées vers le groupe de vérification.", reply_markup=await main_keyboard())
+        else:
+            await set_setting("rediffusion_enabled", "off")
+            await safe_edit(q, "📡 Rediffusion : OFF\nAucun média ne sera copié.", reply_markup=await main_keyboard())
         return
 
     if data == "share_publicity_menu":
@@ -2773,6 +2773,58 @@ async def fake_command_punish(update, context):
     await send_public_warning(context, GROUP_ID, MSG_FAKE_COMMAND, seconds=180)
 
 
+async def grace_presidentielle_candidates():
+    async with db_pool.acquire() as con:
+        ids = set()
+        for table, col in [
+            ("danger_scores", "user_id"),
+            ("user_violations", "user_id"),
+            ("participants", "user_id"),
+            ("messages", "user_id"),
+        ]:
+            try:
+                rows = await con.fetch(f"SELECT DISTINCT {col} AS user_id FROM {table} WHERE {col} IS NOT NULL")
+                ids.update(int(r["user_id"]) for r in rows if r["user_id"])
+            except Exception:
+                pass
+    return sorted([uid for uid in ids if not is_protected_user(uid)])
+
+
+async def grace_ministerielle_candidates():
+    async with db_pool.acquire() as con:
+        rows = await con.fetch("""
+        SELECT user_id
+        FROM restricted_users
+        WHERE user_id IS NOT NULL
+        ORDER BY updated_at DESC
+        """)
+    return [int(r["user_id"]) for r in rows if r["user_id"] and not is_protected_user(int(r["user_id"]))]
+
+
+async def repair_v50_candidates():
+    async with db_pool.acquire() as con:
+        ids = set()
+        for table, col in [
+            ("danger_scores", "user_id"),
+            ("user_violations", "user_id"),
+            ("participants", "user_id"),
+            ("messages", "user_id"),
+        ]:
+            try:
+                rows = await con.fetch(f"SELECT DISTINCT {col} AS user_id FROM {table} WHERE {col} IS NOT NULL")
+                ids.update(int(r["user_id"]) for r in rows if r["user_id"])
+            except Exception:
+                pass
+    return sorted([uid for uid in ids if not is_protected_user(uid)])
+
+
+def grace_confirm_keyboard(confirm_callback: str):
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("✅ Confirmer", callback_data=confirm_callback)],
+        [InlineKeyboardButton("❌ Annuler", callback_data="info")],
+    ])
+
+
 async def grace_presidentielle(context):
     ids = await grace_presidentielle_candidates()
     count = 0
@@ -2798,30 +2850,6 @@ async def grace_ministerielle(context):
         except Exception as e:
             print(f"GRACE MINISTERIELLE UNRESTRICT ERROR user={uid}: {e}", flush=True)
     return count
-
-
-async def repair_v50_candidates():
-    async with db_pool.acquire() as con:
-        ids = set()
-        for table, col in [
-            ("danger_scores", "user_id"),
-            ("user_violations", "user_id"),
-            ("participants", "user_id"),
-            ("messages", "user_id"),
-        ]:
-            try:
-                rows = await con.fetch(f"SELECT DISTINCT {col} AS user_id FROM {table} WHERE {col} IS NOT NULL")
-                ids.update(int(r["user_id"]) for r in rows if r["user_id"])
-            except Exception:
-                pass
-    return sorted([uid for uid in ids if not is_protected_user(uid)])
-
-
-def grace_confirm_keyboard(confirm_callback: str):
-    return InlineKeyboardMarkup([
-        [InlineKeyboardButton("✅ Confirmer", callback_data=confirm_callback)],
-        [InlineKeyboardButton("❌ Annuler", callback_data="info")],
-    ])
 
 
 async def repair_v50_restrictions(context):
