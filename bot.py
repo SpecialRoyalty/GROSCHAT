@@ -39,7 +39,11 @@ from telegram.ext import (
     filters,
 )
 
-APP_VERSION = "FINAL_COMPLETE_V58_HASH_RESTORE"
+MSG_GENERIC_FORBIDDEN = "🚫 Message non autorisé."
+MSG_FAKE_COMMAND = "🔇 Commande réservée à la modération. Si vous essayez, vous êtes sanctionné."
+MSG_REPOST = "♻️ Ce média a déjà été publié."
+MSG_LINK_FORBIDDEN = "🔗 Les liens ne sont pas autorisés."
+APP_VERSION = "FINAL_COMPLETE_V60_GLOBAL_STABILITY_FIX"
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 BOT_USERNAME = os.getenv("BOT_USERNAME", "").replace("@", "")
@@ -483,6 +487,15 @@ async def init_db():
         await con.execute("ALTER TABLE IF EXISTS leaderboard_rank_cache ADD COLUMN IF NOT EXISTS last_count INTEGER DEFAULT 0")
         await con.execute("ALTER TABLE IF EXISTS leaderboard_rank_cache ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT NOW()")
 
+        await con.execute("ALTER TABLE IF EXISTS user_violations ADD COLUMN IF NOT EXISTS violation_type TEXT DEFAULT 'general'")
+        await con.execute("ALTER TABLE IF EXISTS user_violations ADD COLUMN IF NOT EXISTS count INTEGER DEFAULT 0")
+        await con.execute("ALTER TABLE IF EXISTS user_violations ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT NOW()")
+        await con.execute("ALTER TABLE IF EXISTS user_violations ADD COLUMN IF NOT EXISTS user_id BIGINT")
+        try:
+            await con.execute("CREATE UNIQUE INDEX IF NOT EXISTS user_violations_user_type_idx ON user_violations(user_id, violation_type)")
+        except Exception as e:
+            print(f"USER_VIOLATIONS INDEX SKIPPED: {e}", flush=True)
+
         tables = await con.fetch("""
         SELECT table_name FROM information_schema.tables
         WHERE table_schema='public'
@@ -560,8 +573,21 @@ def is_super_trusted(user_id: int) -> bool:
 def is_trusted_or_super(user_id: int) -> bool:
     return user_id in TRUSTED_IDS or user_id in SUPER_TRUSTED_IDS or is_admin(user_id)
 
+
 def is_protected_user(user_id: int) -> bool:
-    return is_admin(user_id) or user_id in TRUSTED_IDS or user_id in SUPER_TRUSTED_IDS
+    return is_admin(user_id) or user_id in TRUSTED_IDS or user_id in SUPER_TRUSTED_IDS or user_id == 1087968824
+
+
+def is_system_or_anonymous_user(user) -> bool:
+    if not user:
+        return True
+    if getattr(user, "is_bot", False) and getattr(user, "username", None) == "GroupAnonymousBot":
+        return True
+    if getattr(user, "id", None) == 1087968824:
+        return True
+    return False
+
+
 
 
 async def is_group_admin(context, user_id: int) -> bool:
@@ -2812,7 +2838,7 @@ def contains_forbidden_token(text: str, pattern: str) -> bool:
 
 
 async def username_is_forbidden(user) -> bool:
-    if not user or is_protected_user(user.id):
+    if not user or is_system_or_anonymous_user(user) or is_protected_user(user.id):
         return False
     parts = []
     if getattr(user, "username", None): parts.append(user.username)
@@ -2870,7 +2896,7 @@ async def alert_auto_ban(context, user, reason: str, detected: str | None = None
 
 
 async def ban_for_forbidden_username(context, user):
-    if not user or is_protected_user(user.id):
+    if not user or is_system_or_anonymous_user(user) or is_protected_user(user.id):
         return False
     try:
         matched_pattern = None
@@ -2906,6 +2932,7 @@ async def punish_word(update, context):
     msg = update.message
     if not user or not msg:
         return
+    print(f"WORD PUNISH TRIGGERED: user={user.id} text={(msg.text or msg.caption or '')[:80]}", flush=True)
     if is_protected_user(user.id):
         return
     await delete_message_safe(context, GROUP_ID, msg.message_id)
@@ -2929,6 +2956,17 @@ async def handle_group_command(update: Update, context: ContextTypes.DEFAULT_TYP
     text=(msg.text or msg.caption or "").strip()
     if text.startswith("/"):
         await fake_command_punish(update, context)
+
+
+async def any_banned_media_key(media_keys: list[str]):
+    if not media_keys:
+        return None
+    async with db_pool.acquire() as con:
+        row = await con.fetchrow(
+            "SELECT hash FROM banned_hashes WHERE hash = ANY($1::text[]) LIMIT 1",
+            media_keys,
+        )
+    return row["hash"] if row else None
 
 
 async def handle_group_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -2996,6 +3034,28 @@ async def handle_group_message(update: Update, context: ContextTypes.DEFAULT_TYP
         await punish_media_mention_ad(update, context)
         return
 
+    # V59) Mots bannis + mots interdits scannés très tôt.
+    # Important : doit passer avant participation, repost, liens, etc.
+    if text and not is_protected_user(user.id):
+        async with db_pool.acquire() as con:
+            hard_words = await con.fetch("SELECT word FROM banned_words_hard")
+        for r in hard_words:
+            word = (r["word"] or "").lower().strip()
+            if word and contains_forbidden_token(text, word):
+                print(f"WORD SCAN DEBUG hard match user={user.id} word={word} text={text[:80]}", flush=True)
+                await punish_ban(update, context, "mot banni", MSG_GENERIC_FORBIDDEN)
+                await alert_auto_ban(context, user, "mot banni dans le message", word)
+                return
+
+        async with db_pool.acquire() as con:
+            words = await con.fetch("SELECT word FROM banned_words")
+        for r in words:
+            word = (r["word"] or "").lower().strip()
+            if word and contains_forbidden_token(text, word):
+                print(f"WORD SCAN DEBUG normal match user={user.id} word={word} text={text[:80]}", flush=True)
+                await punish_word(update, context)
+                return
+
     # 6.3) new_chat_members username interdit.
     if getattr(msg, "new_chat_members", None):
         for joined_user in msg.new_chat_members:
@@ -3023,15 +3083,11 @@ async def handle_group_message(update: Update, context: ContextTypes.DEFAULT_TYP
         h = media_keys[0] if media_keys else None
 
     if media_keys:
-        # V58 banned_hashes priority check.
-        # Must be checked BEFORE media_hashes/repost.
-        async with db_pool.acquire() as con:
-            banned_rows = await con.fetch(
-                "SELECT hash FROM banned_hashes WHERE hash = ANY($1::text[])",
-                media_keys,
-            )
-
-        if banned_rows:
+        # V60 banned_hashes priority check.
+        # Must run before repost/media_hashes.
+        banned_key = await any_banned_media_key(media_keys)
+        if banned_key:
+            print(f"BANNED HASH MATCH: user={user.id} hash={banned_key}", flush=True)
             if is_protected_user(user.id):
                 await delete_message_safe(context, GROUP_ID, msg.message_id)
                 try:
@@ -3039,9 +3095,10 @@ async def handle_group_message(update: Update, context: ContextTypes.DEFAULT_TYP
                 except Exception as e:
                     print(f"PROTECTED BANNED HASH PURGE ERROR: {e}", flush=True)
                 return
-
             await punish_ban(update, context, "média interdit", MSG_GENERIC_FORBIDDEN)
             return
+
+
 
 
         banned_match = await find_matching_banned_media(media_keys)
@@ -3084,26 +3141,6 @@ async def handle_group_message(update: Update, context: ContextTypes.DEFAULT_TYP
 
         await rediffuse_media_if_enabled(update, context)
 
-    # 7.9) Mots bannis : priorité absolue sur mots interdits, ban direct.
-    if not is_protected_user(user.id):
-        async with db_pool.acquire() as con:
-            hard_words = await con.fetch("SELECT word FROM banned_words_hard")
-        for r in hard_words:
-            word = (r["word"] or "").lower()
-            if word and contains_forbidden_token(text, word):
-                await punish_ban(update, context, "mot banni", MSG_GENERIC_FORBIDDEN)
-                await alert_auto_ban(context, user, "mot banni dans le message", word)
-                return
-
-    # 8) Mots interdits.
-    if not is_protected_user(user.id):
-        async with db_pool.acquire() as con:
-            words = await con.fetch("SELECT word FROM banned_words")
-        for r in words:
-            word = r["word"].lower()
-            if word and contains_forbidden_token(text, word):
-                await punish_word(update, context)
-                return
 
     # 9) Participation obligatoire EN DERNIER.
     if await get_setting("participation", "off") == "on":
