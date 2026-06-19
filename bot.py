@@ -39,7 +39,7 @@ from telegram.ext import (
     filters,
 )
 
-APP_VERSION = "FINAL_COMPLETE_V54_OLD_RESTRICTIONS_FIX"
+APP_VERSION = "FINAL_COMPLETE_V55_SAFE_MINISTERIELLE"
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 BOT_USERNAME = os.getenv("BOT_USERNAME", "").replace("@", "")
@@ -2111,20 +2111,24 @@ async def callbacks(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     if data == "grace_ministerielle":
-        tracked = await grace_ministerielle_candidates()
-        legacy = await repair_v50_candidates()
+        ids = await grace_ministerielle_candidates()
+        if not ids:
+            await safe_edit(
+                q,
+                "🏛️ Grâce ministérielle\n\nAucune restriction suivie par le bot.\n\n"
+                "Les anciennes exceptions Telegram doivent être retirées manuellement dans Telegram : "
+                "Permissions du groupe > Exceptions.",
+                reply_markup=await main_keyboard()
+            )
+            return
+
         await safe_edit(
             q,
-            "🏛️ Grâce ministérielle\n\n"
-            f"Restrictions suivies par le bot : {len(tracked)}\n"
-            f"Anciennes restrictions possibles dans les utilisateurs connus : {len(legacy)}\n\n"
-            "Telegram ne permet pas au bot de lire directement la liste complète des Exceptions du groupe.\n\n"
-            "Choisis l’action :",
-            reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("✅ Libérer restrictions suivies", callback_data="confirm_grace_ministerielle")],
-                [InlineKeyboardButton("🧯 Réparer anciennes restrictions", callback_data="repair_v50")],
-                [InlineKeyboardButton("❌ Annuler", callback_data="info")],
-            ])
+            f"🏛️ Grâce ministérielle\n\nRestrictions suivies par le bot : {len(ids)}\n\n"
+            "Seuls ces utilisateurs seront libérés.\n"
+            "Aucun utilisateur inconnu ne sera modifié.\n"
+            "Voulez-vous continuer ?",
+            reply_markup=grace_confirm_keyboard("confirm_grace_ministerielle")
         )
         return
 
@@ -2153,24 +2157,6 @@ async def callbacks(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"👑 Grâce présidentielle appliquée.\nPersonnes débannies : {count}\nLes hash interdits sont conservés.",
             reply_markup=await main_keyboard()
         )
-        return
-
-    if data == "repair_v50":
-        ids = await repair_v50_candidates()
-        await safe_edit(
-            q,
-            "🧯 Réparer anciennes restrictions\n\n"
-            f"Utilisateurs connus qui recevront les droits d’envoi : {len(ids)}\n\n"
-            "À utiliser pour les restrictions créées avant le suivi `restricted_users`.\n"
-            "Ça ne débannit pas les bans permanents.\n\n"
-            "Voulez-vous continuer ?",
-            reply_markup=grace_confirm_keyboard("confirm_repair_v50")
-        )
-        return
-
-    if data == "confirm_repair_v50":
-        count = await repair_v50_restrictions(context)
-        await safe_edit(q, f"🧯 Réparation V50 terminée.\nDroits rendus : {count}", reply_markup=await main_keyboard())
         return
 
     if data == "toggle_rediffusion":
@@ -2814,23 +2800,6 @@ async def grace_ministerielle_candidates():
     return [int(r["user_id"]) for r in rows if r["user_id"] and not is_protected_user(int(r["user_id"]))]
 
 
-async def repair_v50_candidates():
-    async with db_pool.acquire() as con:
-        ids = set()
-        for table, col in [
-            ("danger_scores", "user_id"),
-            ("user_violations", "user_id"),
-            ("participants", "user_id"),
-            ("messages", "user_id"),
-        ]:
-            try:
-                rows = await con.fetch(f"SELECT DISTINCT {col} AS user_id FROM {table} WHERE {col} IS NOT NULL")
-                ids.update(int(r["user_id"]) for r in rows if r["user_id"])
-            except Exception:
-                pass
-    return sorted([uid for uid in ids if not is_protected_user(uid)])
-
-
 def grace_confirm_keyboard(confirm_callback: str):
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("✅ Confirmer", callback_data=confirm_callback)],
@@ -2862,19 +2831,6 @@ async def grace_ministerielle(context):
             await asyncio.sleep(0.03)
         except Exception as e:
             print(f"GRACE MINISTERIELLE UNRESTRICT ERROR user={uid}: {e}", flush=True)
-    return count
-
-
-async def repair_v50_restrictions(context):
-    ids = await repair_v50_candidates()
-    count = 0
-    for uid in ids:
-        try:
-            await unrestrict_user(context, uid)
-            count += 1
-            await asyncio.sleep(0.03)
-        except Exception as e:
-            print(f"REPAIR V50 ERROR user={uid}: {e}", flush=True)
     return count
 
 

@@ -1,4 +1,4 @@
-# Telegram Railway Bot - FINAL_COMPLETE_V54_OLD_RESTRICTIONS_FIX
+# Telegram Railway Bot - FINAL_COMPLETE_V55_SAFE_MINISTERIELLE
 
 Version cohérente nettoyée.
 
@@ -31,7 +31,7 @@ Version cohérente nettoyée.
 
 Dans les logs :
 
-STARTING FINAL_COMPLETE_V54_OLD_RESTRICTIONS_FIX
+STARTING FINAL_COMPLETE_V55_SAFE_MINISTERIELLE
 
 Si tu vois encore `Vidéos : x/60`, c'est que Railway tourne encore sur une ancienne version.
 
@@ -79,7 +79,7 @@ Message d'avertissement enrichi :
 - Compatible base neuve et ancienne base partiellement migrée.
 
 Vérification Railway :
-STARTING FINAL_COMPLETE_V54_OLD_RESTRICTIONS_FIX
+STARTING FINAL_COMPLETE_V55_SAFE_MINISTERIELLE
 
 
 ## V22 - Correction complète SQL / hash / anti-repost
@@ -101,7 +101,7 @@ Important :
 - sinon V22 tente de réparer automatiquement le schéma.
 
 Vérification Railway :
-STARTING FINAL_COMPLETE_V54_OLD_RESTRICTIONS_FIX
+STARTING FINAL_COMPLETE_V55_SAFE_MINISTERIELLE
 
 Test rapide :
 1. envoie une photo ;
@@ -128,7 +128,7 @@ Changements :
   - plus de spam mode raid.
 
 Vérification Railway :
-STARTING FINAL_COMPLETE_V54_OLD_RESTRICTIONS_FIX
+STARTING FINAL_COMPLETE_V55_SAFE_MINISTERIELLE
 
 
 ## V24 - Textes runtime corrigés
@@ -169,7 +169,7 @@ Correction incluse :
 - fix `MSG_FAKE_COMMAND` si la V24 contenait l'auto-référence cassée.
 
 Vérification Railway :
-STARTING FINAL_COMPLETE_V54_OLD_RESTRICTIONS_FIX
+STARTING FINAL_COMPLETE_V55_SAFE_MINISTERIELLE
 
 
 ## V26 - Fix punish_ban + rapports admin
@@ -182,7 +182,7 @@ Corrections :
 - Transferts toujours autorisés comme en V25.
 
 Vérification Railway :
-STARTING FINAL_COMPLETE_V54_OLD_RESTRICTIONS_FIX
+STARTING FINAL_COMPLETE_V55_SAFE_MINISTERIELLE
 
 
 ## V27 - Hash robuste + message dissuasion modération
@@ -201,7 +201,7 @@ Message dissuasion :
 - affiche suppressions, exclusions et restrictions.
 
 Vérification Railway :
-STARTING FINAL_COMPLETE_V54_OLD_RESTRICTIONS_FIX
+STARTING FINAL_COMPLETE_V55_SAFE_MINISTERIELLE
 
 
 ## V28 - Fix trusted mute
@@ -214,7 +214,7 @@ Correction :
 - Un trusted qui utilise ces commandes n'est jamais mute par ce système.
 
 Vérification Railway :
-STARTING FINAL_COMPLETE_V54_OLD_RESTRICTIONS_FIX
+STARTING FINAL_COMPLETE_V55_SAFE_MINISTERIELLE
 
 
 ## V29 - Priorité média interdit + trusted silencieux
@@ -230,7 +230,7 @@ Corrections :
 - `/supprimer` reste alias officiel de `/supprime`.
 
 Vérification Railway :
-STARTING FINAL_COMPLETE_V54_OLD_RESTRICTIONS_FIX
+STARTING FINAL_COMPLETE_V55_SAFE_MINISTERIELLE
 
 
 ## V30_FRAMEHASH - Hash visuel photo + première frame vidéo
@@ -249,7 +249,7 @@ Dépendances ajoutées :
 - opencv-python-headless
 
 Vérification Railway :
-STARTING FINAL_COMPLETE_V54_OLD_RESTRICTIONS_FIX
+STARTING FINAL_COMPLETE_V55_SAFE_MINISTERIELLE
 
 
 ## V31_PURGE - purge complète après média interdit
@@ -277,7 +277,7 @@ Rappels fermeture :
 - 5/4/3/2/1 minutes avant.
 
 Vérification Railway :
-STARTING FINAL_COMPLETE_V54_OLD_RESTRICTIONS_FIX
+STARTING FINAL_COMPLETE_V55_SAFE_MINISTERIELLE
 
 ## V33_VIP_ADS
 
@@ -502,3 +502,11 @@ Correction UX :
 - Ajout d'un choix clair :
   - libérer restrictions suivies ;
   - réparer anciennes restrictions.
+
+## V55_SAFE_MINISTERIELLE
+
+Correction importante :
+- suppression du bouton dangereux de réparation des anciennes restrictions ;
+- grâce ministérielle ne touche QUE `restricted_users` ;
+- si `restricted_users` est vide, aucune action automatique n'est lancée ;
+- les anciennes exceptions Telegram doivent être retirées manuellement depuis Telegram.
