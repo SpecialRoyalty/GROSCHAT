@@ -39,7 +39,7 @@ from telegram.ext import (
     filters,
 )
 
-APP_VERSION = "FINAL_COMPLETE_V49_ADMIN_ALERTS"
+APP_VERSION = "FINAL_COMPLETE_V50_GRACE_FIX"
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 BOT_USERNAME = os.getenv("BOT_USERNAME", "").replace("@", "")
@@ -2121,7 +2121,7 @@ async def callbacks(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if data == "grace_ministerielle":
         count = await grace_ministerielle(context)
-        await safe_edit(q, f"🏛️ Grâce ministérielle appliquée.\nRestrictions levées : {count}", reply_markup=await main_keyboard())
+        await safe_edit(q, f"🏛️ Grâce ministérielle appliquée.\nRestrictions/mutes levés : {count}\nAucun ban permanent débanni.", reply_markup=await main_keyboard())
         return
 
     if data == "share_publicity_menu":
@@ -2653,10 +2653,41 @@ async def restrict_user_days(context, user_id: int, days: int):
 
 
 async def unrestrict_user(context, user_id: int):
-    await context.bot.restrict_chat_member(
-        GROUP_ID, user_id,
-        ChatPermissions(can_send_messages=True, can_send_audios=True, can_send_documents=True, can_send_photos=True, can_send_videos=True, can_send_video_notes=True, can_send_voice_notes=True, can_send_polls=True, can_send_other_messages=True, can_add_web_page_previews=True, can_invite_users=True)
+    # V50 : grâce ministérielle = lever les restrictions.
+    # On remet explicitement tous les droits d'envoi possibles.
+    permissions = ChatPermissions(
+        can_send_messages=True,
+        can_send_audios=True,
+        can_send_documents=True,
+        can_send_photos=True,
+        can_send_videos=True,
+        can_send_video_notes=True,
+        can_send_voice_notes=True,
+        can_send_polls=True,
+        can_send_other_messages=True,
+        can_add_web_page_previews=True,
+        can_change_info=False,
+        can_invite_users=True,
+        can_pin_messages=False,
+        can_manage_topics=True,
     )
+
+    try:
+        await context.bot.restrict_chat_member(
+            chat_id=GROUP_ID,
+            user_id=user_id,
+            permissions=permissions,
+            until_date=None,
+        )
+        return True
+    except TypeError:
+        # Compatibilité anciennes versions PTB.
+        await context.bot.restrict_chat_member(
+            GROUP_ID,
+            user_id,
+            permissions,
+        )
+        return True
 
 
 async def fake_command_punish(update, context):
@@ -2698,24 +2729,32 @@ async def grace_presidentielle(context):
 
 
 async def grace_ministerielle(context):
+    # Rétroactif pour les personnes connues en base : retire les restrictions/mutes.
     async with db_pool.acquire() as con:
-        ids=set()
-        for table,col in [("danger_scores","user_id"),("user_violations","user_id"),("participants","user_id"),("messages","user_id")]:
+        ids = set()
+        for table, col in [
+            ("danger_scores", "user_id"),
+            ("user_violations", "user_id"),
+            ("participants", "user_id"),
+            ("messages", "user_id"),
+        ]:
             try:
-                rows=await con.fetch(f"SELECT DISTINCT {col} AS user_id FROM {table} WHERE {col} IS NOT NULL")
+                rows = await con.fetch(f"SELECT DISTINCT {col} AS user_id FROM {table} WHERE {col} IS NOT NULL")
                 ids.update(int(r["user_id"]) for r in rows if r["user_id"])
             except Exception:
                 pass
-    count=0
+
+    count = 0
     for uid in ids:
         if is_protected_user(uid):
             continue
         try:
-            await unrestrict_user(context, uid)
-            count+=1
+            ok = await unrestrict_user(context, uid)
+            if ok:
+                count += 1
             await asyncio.sleep(0.03)
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"GRACE MINISTERIELLE UNRESTRICT ERROR user={uid}: {e}", flush=True)
     return count
 
 
