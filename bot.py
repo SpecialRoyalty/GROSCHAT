@@ -39,7 +39,7 @@ from telegram.ext import (
     filters,
 )
 
-APP_VERSION = "FINAL_COMPLETE_V53_GRACE_CONFIRM_FIX"
+APP_VERSION = "FINAL_COMPLETE_V54_OLD_RESTRICTIONS_FIX"
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 BOT_USERNAME = os.getenv("BOT_USERNAME", "").replace("@", "")
@@ -2110,6 +2110,33 @@ async def callbacks(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await safe_edit(q, await panel_text("Campagne publiée"), reply_markup=await main_keyboard())
         return
 
+    if data == "grace_ministerielle":
+        tracked = await grace_ministerielle_candidates()
+        legacy = await repair_v50_candidates()
+        await safe_edit(
+            q,
+            "🏛️ Grâce ministérielle\n\n"
+            f"Restrictions suivies par le bot : {len(tracked)}\n"
+            f"Anciennes restrictions possibles dans les utilisateurs connus : {len(legacy)}\n\n"
+            "Telegram ne permet pas au bot de lire directement la liste complète des Exceptions du groupe.\n\n"
+            "Choisis l’action :",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("✅ Libérer restrictions suivies", callback_data="confirm_grace_ministerielle")],
+                [InlineKeyboardButton("🧯 Réparer anciennes restrictions", callback_data="repair_v50")],
+                [InlineKeyboardButton("❌ Annuler", callback_data="info")],
+            ])
+        )
+        return
+
+    if data == "confirm_grace_ministerielle":
+        count = await grace_ministerielle(context)
+        await safe_edit(
+            q,
+            f"🏛️ Grâce ministérielle appliquée.\nRestrictions/mutes suivis levés : {count}\nAucun ban permanent débanni.",
+            reply_markup=await main_keyboard()
+        )
+        return
+
     if data == "grace_presidentielle":
         ids = await grace_presidentielle_candidates()
         await safe_edit(
@@ -2128,29 +2155,15 @@ async def callbacks(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    if data == "grace_ministerielle":
-        ids = await grace_ministerielle_candidates()
-        await safe_edit(
-            q,
-            f"🏛️ Grâce ministérielle\n\nUtilisateurs actuellement suivis comme restreints : {len(ids)}\n\nAucun ban permanent ne sera débanni.\nVoulez-vous continuer ?",
-            reply_markup=grace_confirm_keyboard("confirm_grace_ministerielle")
-        )
-        return
-
-    if data == "confirm_grace_ministerielle":
-        count = await grace_ministerielle(context)
-        await safe_edit(
-            q,
-            f"🏛️ Grâce ministérielle appliquée.\nRestrictions/mutes suivis levés : {count}\nAucun ban permanent débanni.",
-            reply_markup=await main_keyboard()
-        )
-        return
-
     if data == "repair_v50":
         ids = await repair_v50_candidates()
         await safe_edit(
             q,
-            f"🧯 Réparer restrictions V50\n\nUtilisateurs connus qui recevront les droits d’envoi : {len(ids)}\n\nÀ utiliser seulement si V50 a restreint trop de monde.\nVoulez-vous continuer ?",
+            "🧯 Réparer anciennes restrictions\n\n"
+            f"Utilisateurs connus qui recevront les droits d’envoi : {len(ids)}\n\n"
+            "À utiliser pour les restrictions créées avant le suivi `restricted_users`.\n"
+            "Ça ne débannit pas les bans permanents.\n\n"
+            "Voulez-vous continuer ?",
             reply_markup=grace_confirm_keyboard("confirm_repair_v50")
         )
         return
