@@ -1,4 +1,4 @@
-# Telegram Railway Bot - FINAL_COMPLETE_V55_SAFE_MINISTERIELLE
+# Telegram Railway Bot - FINAL_COMPLETE_V57_WORD_BOUNDARY_FIX
 
 Version cohérente nettoyée.
 
@@ -31,7 +31,7 @@ Version cohérente nettoyée.
 
 Dans les logs :
 
-STARTING FINAL_COMPLETE_V55_SAFE_MINISTERIELLE
+STARTING FINAL_COMPLETE_V57_WORD_BOUNDARY_FIX
 
 Si tu vois encore `Vidéos : x/60`, c'est que Railway tourne encore sur une ancienne version.
 
@@ -79,7 +79,7 @@ Message d'avertissement enrichi :
 - Compatible base neuve et ancienne base partiellement migrée.
 
 Vérification Railway :
-STARTING FINAL_COMPLETE_V55_SAFE_MINISTERIELLE
+STARTING FINAL_COMPLETE_V57_WORD_BOUNDARY_FIX
 
 
 ## V22 - Correction complète SQL / hash / anti-repost
@@ -101,7 +101,7 @@ Important :
 - sinon V22 tente de réparer automatiquement le schéma.
 
 Vérification Railway :
-STARTING FINAL_COMPLETE_V55_SAFE_MINISTERIELLE
+STARTING FINAL_COMPLETE_V57_WORD_BOUNDARY_FIX
 
 Test rapide :
 1. envoie une photo ;
@@ -128,7 +128,7 @@ Changements :
   - plus de spam mode raid.
 
 Vérification Railway :
-STARTING FINAL_COMPLETE_V55_SAFE_MINISTERIELLE
+STARTING FINAL_COMPLETE_V57_WORD_BOUNDARY_FIX
 
 
 ## V24 - Textes runtime corrigés
@@ -169,7 +169,7 @@ Correction incluse :
 - fix `MSG_FAKE_COMMAND` si la V24 contenait l'auto-référence cassée.
 
 Vérification Railway :
-STARTING FINAL_COMPLETE_V55_SAFE_MINISTERIELLE
+STARTING FINAL_COMPLETE_V57_WORD_BOUNDARY_FIX
 
 
 ## V26 - Fix punish_ban + rapports admin
@@ -182,7 +182,7 @@ Corrections :
 - Transferts toujours autorisés comme en V25.
 
 Vérification Railway :
-STARTING FINAL_COMPLETE_V55_SAFE_MINISTERIELLE
+STARTING FINAL_COMPLETE_V57_WORD_BOUNDARY_FIX
 
 
 ## V27 - Hash robuste + message dissuasion modération
@@ -201,7 +201,7 @@ Message dissuasion :
 - affiche suppressions, exclusions et restrictions.
 
 Vérification Railway :
-STARTING FINAL_COMPLETE_V55_SAFE_MINISTERIELLE
+STARTING FINAL_COMPLETE_V57_WORD_BOUNDARY_FIX
 
 
 ## V28 - Fix trusted mute
@@ -214,7 +214,7 @@ Correction :
 - Un trusted qui utilise ces commandes n'est jamais mute par ce système.
 
 Vérification Railway :
-STARTING FINAL_COMPLETE_V55_SAFE_MINISTERIELLE
+STARTING FINAL_COMPLETE_V57_WORD_BOUNDARY_FIX
 
 
 ## V29 - Priorité média interdit + trusted silencieux
@@ -230,7 +230,7 @@ Corrections :
 - `/supprimer` reste alias officiel de `/supprime`.
 
 Vérification Railway :
-STARTING FINAL_COMPLETE_V55_SAFE_MINISTERIELLE
+STARTING FINAL_COMPLETE_V57_WORD_BOUNDARY_FIX
 
 
 ## V30_FRAMEHASH - Hash visuel photo + première frame vidéo
@@ -249,7 +249,7 @@ Dépendances ajoutées :
 - opencv-python-headless
 
 Vérification Railway :
-STARTING FINAL_COMPLETE_V55_SAFE_MINISTERIELLE
+STARTING FINAL_COMPLETE_V57_WORD_BOUNDARY_FIX
 
 
 ## V31_PURGE - purge complète après média interdit
@@ -277,7 +277,7 @@ Rappels fermeture :
 - 5/4/3/2/1 minutes avant.
 
 Vérification Railway :
-STARTING FINAL_COMPLETE_V55_SAFE_MINISTERIELLE
+STARTING FINAL_COMPLETE_V57_WORD_BOUNDARY_FIX
 
 ## V33_VIP_ADS
 
@@ -510,3 +510,21 @@ Correction importante :
 - grâce ministérielle ne touche QUE `restricted_users` ;
 - si `restricted_users` est vide, aucune action automatique n'est lancée ;
 - les anciennes exceptions Telegram doivent être retirées manuellement depuis Telegram.
+
+## V56_NO_GRACE
+
+Nettoyage :
+- suppression complète du bouton Grâce présidentielle ;
+- suppression complète du bouton Grâce ministérielle ;
+- suppression complète du bouton réparation anciennes restrictions ;
+- suppression des callbacks et helpers associés ;
+- aucun appel massif `unban` ou `unrestrict` depuis le panel admin ;
+- le reste du bot reste inchangé.
+
+## V57_WORD_BOUNDARY_FIX
+
+Correction :
+- `forbidden_usernames` ne matche plus une sous-partie d'un mot.
+- Exemple : `hi` ne bannit plus `Mathias`.
+- `hi` continue à matcher `hi`, `hi_123`, `hello-hi`, `hi.test`.
+- même logique appliquée aux mots bannis.
