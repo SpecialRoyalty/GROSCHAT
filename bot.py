@@ -39,7 +39,7 @@ from telegram.ext import (
     filters,
 )
 
-APP_VERSION = "FINAL_COMPLETE_V47_HARD_FILTERS"
+APP_VERSION = "FINAL_COMPLETE_V48_FORWARD_FIX"
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 BOT_USERNAME = os.getenv("BOT_USERNAME", "").replace("@", "")
@@ -2819,10 +2819,27 @@ async def ban_for_forbidden_username(context, user):
     if not user or is_protected_user(user.id):
         return False
     try:
+        matched_pattern = None
+        try:
+            parts = []
+            if getattr(user, "username", None): parts.append(user.username)
+            if getattr(user, "first_name", None): parts.append(user.first_name)
+            if getattr(user, "last_name", None): parts.append(user.last_name)
+            full = " ".join(parts).lower()
+            async with db_pool.acquire() as con:
+                rows = await con.fetch("SELECT pattern FROM forbidden_usernames")
+            for r in rows:
+                p = (r["pattern"] or "").lower().strip()
+                if p and p in full:
+                    matched_pattern = p
+                    break
+        except Exception:
+            pass
+        print(f"USERNAME BAN MATCH: user={user.id} username={getattr(user, 'username', None)} pattern={matched_pattern}", flush=True)
         await context.bot.ban_chat_member(GROUP_ID, user.id)
         await increment_ban_count()
         await increment_session_counter("session_exclusions")
-        await add_danger(user.id, 20, "username interdit")
+        await add_danger(user.id, 20, f"username interdit:{matched_pattern}")
         return True
     except Exception as e:
         print(f"USERNAME BAN ERROR: {e}", flush=True)
@@ -2933,7 +2950,7 @@ async def handle_group_message(update: Update, context: ContextTypes.DEFAULT_TYP
 
     # 6.5) Interdits critiques : bots, forwards/story/live.
     if not is_protected_user(user.id):
-        if msg.forward_origin or msg.forward_from or msg.forward_from_chat:
+        if getattr(msg, "forward_origin", None) or getattr(msg, "forward_from", None) or getattr(msg, "forward_from_chat", None):
             # V47: forwards média autorisés. Forward texte/non-média reste interdit.
             if not (msg.photo or msg.video):
                 await punish_ban(update, context, "transfert interdit", MSG_GENERIC_FORBIDDEN)
