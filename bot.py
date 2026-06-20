@@ -43,7 +43,7 @@ MSG_GENERIC_FORBIDDEN = "🚫 Message non autorisé."
 MSG_FAKE_COMMAND = "🔇 Commande réservée à la modération. Si vous essayez, vous êtes sanctionné."
 MSG_REPOST = "♻️ Ce média a déjà été publié."
 MSG_LINK_FORBIDDEN = "🔗 Les liens ne sont pas autorisés."
-APP_VERSION = "FINAL_COMPLETE_V60_GLOBAL_STABILITY_FIX"
+APP_VERSION = "FINAL_COMPLETE_V61_PARTICIPATION_WARNING_FIX"
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 BOT_USERNAME = os.getenv("BOT_USERNAME", "").replace("@", "")
@@ -2969,6 +2969,30 @@ async def any_banned_media_key(media_keys: list[str]):
     return row["hash"] if row else None
 
 
+def plain_user_mention(user) -> str:
+    if getattr(user, "username", None):
+        return "@" + user.username
+    name = " ".join([x for x in [getattr(user, "first_name", None), getattr(user, "last_name", None)] if x])
+    return name.strip() or "membre"
+
+
+async def send_participation_required_warning(context, user):
+    # Toujours visible, même si sanctions silencieuses OFF.
+    text = (
+        f"⚠️ {plain_user_mention(user)}, merci de participer avant d’envoyer un message.\n"
+        "Envoyez au moins 1 photo ou 1 vidéo jamais publiée."
+    )
+    try:
+        msg = await context.bot.send_message(GROUP_ID, text)
+        await save_message(GROUP_ID, msg.message_id, None, True)
+        context.application.create_task(delete_later(context, GROUP_ID, msg.message_id, 10))
+        print(f"PARTICIPATION WARNING SENT: user={getattr(user, 'id', None)} msg={msg.message_id}", flush=True)
+        return msg
+    except Exception as e:
+        print(f"PARTICIPATION WARNING SEND ERROR user={getattr(user, 'id', None)}: {e}", flush=True)
+        return None
+
+
 async def handle_group_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.message or update.effective_chat.id != GROUP_ID:
         return
@@ -3146,14 +3170,10 @@ async def handle_group_message(update: Update, context: ContextTypes.DEFAULT_TYP
     if await get_setting("participation", "off") == "on":
         if not await has_participated(user.id):
             if not message_is_photo_or_video(msg):
+                print(f"PARTICIPATION REQUIRED TRIGGERED: user={user.id} msg={msg.message_id}", flush=True)
                 await delete_message_safe(context, GROUP_ID, msg.message_id)
                 await increment_session_counter("session_deletions")
-                await send_temp_message(
-                    context,
-                    GROUP_ID,
-                    MSG_PARTICIPATION_REQUIRED_MENTION.format(mention=user_mention(user)),
-                    seconds=10
-                )
+                await send_participation_required_warning(context, user)
                 await add_danger(user.id, 1, "message avant participation")
                 return
 
