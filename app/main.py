@@ -8,6 +8,22 @@ from app.services.state import ensure_status_message, cleanup_known_status_dupli
 from app.handlers import admin, callbacks, group
 from app.scheduler import start_scheduler
 
+from app.config import get_settings
+
+s = get_settings()
+
+msg = (
+    "🚀 Bot démarré\n\n"
+    f"Admins chargés ({len(s.admin_id_set)}) :\n{s.admin_id_set}\n\n"
+    f"Trusted chargés ({len(s.trusted_id_set)}) :\n{s.trusted_id_set}"
+)
+
+for admin_id in s.admin_id_set:
+    try:
+        await bot.send_message(admin_id, msg)
+    except Exception as e:
+        print(f"Impossible d'envoyer le diagnostic à {admin_id}: {e}")
+
 async def main():
     logging.basicConfig(level=logging.INFO)
     s=get_settings()
