@@ -9,7 +9,7 @@ from app.services.state import log_error
 
 async def trusted_command(bot:Bot,msg:Message):
     if not msg.from_user or msg.from_user.id not in get_settings().all_admin_ids: return False
-    cmd=(msg.text or '').split()[0].lower().split('@')[0]
+    cmd=(msg.text or '').split()[0].lower()
     if cmd not in ['/supprime','/mineur','/pasfr','/pedo','/clean','/info']: return False
     try: await bot.delete_message(msg.chat.id,msg.message_id)
     except Exception: pass
