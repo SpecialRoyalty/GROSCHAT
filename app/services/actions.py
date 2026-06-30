@@ -11,6 +11,15 @@ from app.services.state import log_error
 TRUSTED_COMMANDS = ['/supprime', '/mineur', '/pasfr', '/pedo', '/clean', '/info']
 
 
+async def notify_admins(bot: Bot, text: str):
+    s = get_settings()
+    for admin_id in s.admin_id_set:
+        try:
+            await bot.send_message(admin_id, text)
+        except Exception as e:
+            print(f"ADMIN DIAG SEND FAILED {admin_id}: {e}", flush=True)
+
+
 async def trusted_command(bot: Bot, msg: Message):
     if not msg.from_user:
         return False
@@ -25,16 +34,23 @@ async def trusted_command(bot: Bot, msg: Message):
 
     s = get_settings()
     uid = msg.from_user.id
+    allowed = uid in s.all_admin_ids
 
-    if uid not in s.all_admin_ids:
-        print(
-            f"TRUSTED COMMAND REFUSED: user_id={uid} "
-            f"username=@{msg.from_user.username or 'none'} "
-            f"name={msg.from_user.full_name!r} "
-            f"cmd={cmd} "
-            f"admin_ids={sorted(s.admin_id_set)} "
-            f"trusted_ids={sorted(s.trusted_id_set)}"
-        )
+    await notify_admins(
+        bot,
+        "🧪 Diagnostic commande trusted\n\n"
+        f"Commande brute : {text}\n"
+        f"Commande parsée : {cmd}\n"
+        f"ID reçu : {uid}\n"
+        f"Username : @{msg.from_user.username or 'aucun'}\n"
+        f"Nom : {msg.from_user.full_name}\n"
+        f"Reconnu admin/trusted : {allowed}\n"
+        f"Reply target : {bool(msg.reply_to_message)}\n\n"
+        f"Admins chargés : {sorted(s.admin_id_set)}\n"
+        f"Trusted chargés : {sorted(s.trusted_id_set)}"
+    )
+
+    if not allowed:
         return False
 
     try:
