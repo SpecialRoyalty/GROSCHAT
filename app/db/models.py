@@ -75,6 +75,25 @@ class MediaHash(Base):
     created_at: Mapped[datetime]=mapped_column(DateTime, default=datetime.utcnow)
     __table_args__=(Index('ix_hash_banned_unique_test','file_unique_id','banned'),)
 
+
+class PerceptualHash(Base):
+    __tablename__='perceptual_hashes_test'
+    id: Mapped[int]=mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int|None]=mapped_column(BigInteger, nullable=True, index=True)
+    media_type: Mapped[str]=mapped_column(String(30), default='unknown', index=True)
+    variant: Mapped[str]=mapped_column(String(20), default='full')
+    hash_value: Mapped[str]=mapped_column(String(32), index=True)
+    bucket0: Mapped[str]=mapped_column(String(4), index=True)
+    bucket1: Mapped[str]=mapped_column(String(4), index=True)
+    bucket2: Mapped[str]=mapped_column(String(4), index=True)
+    bucket3: Mapped[str]=mapped_column(String(4), index=True)
+    banned: Mapped[bool]=mapped_column(Boolean, default=False, index=True)
+    created_at: Mapped[datetime]=mapped_column(DateTime, default=datetime.utcnow)
+    __table_args__=(
+        UniqueConstraint('user_id','media_type','variant','hash_value', name='uq_perceptual_user_hash_test'),
+        Index('ix_perceptual_banned_type_test','banned','media_type'),
+    )
+
 class TrustedAction(Base):
     __tablename__='trusted_actions_test'
     id: Mapped[int]=mapped_column(Integer, primary_key=True, autoincrement=True)
