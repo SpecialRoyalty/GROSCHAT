@@ -1,11 +1,11 @@
-from sqlalchemy import select, update
+from sqlalchemy import select
 from aiogram import Bot
 from aiogram.types import Message
 from app.db.session import SessionLocal
-from app.db.models import TrackedMessage, TrustedAction, MediaHash
+from app.db.models import TrackedMessage, TrustedAction
 from app.config import get_settings
 from app.services.moderation import ban, restrict, delete
-from app.services.hashban import ban_hash_from_message
+from app.services.hashban import ban_hash_from_message, ban_all_known_media_for_user
 
 
 async def trusted_command(bot: Bot, msg: Message):
@@ -79,14 +79,11 @@ async def trusted_command(bot: Bot, msg: Message):
         # Bannissement robuste du média ciblé : file_unique_id + SHA-256.
         await ban_hash_from_message(target, bot)
 
-        async with SessionLocal() as db:
-            # Tous les médias déjà connus de cet utilisateur deviennent interdits.
-            await db.execute(
-                update(MediaHash)
-                .where(MediaHash.user_id == uid)
-                .values(banned=True)
-            )
+        # Tous ses médias déjà connus, y compris leurs empreintes visuelles,
+        # deviennent interdits.
+        await ban_all_known_media_for_user(uid)
 
+        async with SessionLocal() as db:
             # Suppression de tous ses messages suivis dans le groupe.
             res = await db.execute(
                 select(TrackedMessage).where(

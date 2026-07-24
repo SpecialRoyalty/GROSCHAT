@@ -9,7 +9,7 @@ from app.db.session import SessionLocal
 from app.db.models import WordRule, MediaHash, TrustedAction, User
 from app.services.users import protected, display_name
 from app.services.state import track, log_error
-from app.services.hashban import file_sha256
+from app.services.hashban import contains_banned_media, record_visual_hashes
 from app.services import settings as st
 
 def has_link(text:str): return bool(re.search(r'(https?://|t\.me/|www\.|\.com\b|\.net\b|\.io\b)', text or '', re.I))
@@ -71,16 +71,6 @@ async def contains_known_media(msg:Message):
         res=await db.execute(select(MediaHash).where(MediaHash.file_unique_id.in_(ids)))
         return res.scalar_one_or_none() is not None
 
-async def contains_banned_hash(bot:Bot,msg:Message):
-    entries=file_ids(msg)
-    ids=[x[0] for x in entries]
-    for _unique,file_id,_typ in entries:
-        sha=await file_sha256(bot,file_id)
-        if sha: ids.append(sha)
-    if not ids: return False
-    async with SessionLocal() as db:
-        res=await db.execute(select(MediaHash).where(MediaHash.file_unique_id.in_(ids),MediaHash.banned==True))
-        return res.scalar_one_or_none() is not None
 async def moderate_message(bot:Bot,msg:Message):
     if not msg.from_user: return
     await track(msg.chat.id,msg.message_id,msg.from_user.id,'message',is_media(msg))
@@ -90,7 +80,7 @@ async def moderate_message(bot:Bot,msg:Message):
     if not await st.is_open() and not (trusted or admin):
         await delete(bot,msg); return
     if is_media(msg):
-        if await contains_banned_hash(bot,msg):
+        if await contains_banned_media(bot,msg):
             await delete(bot,msg); await ban(bot,msg.chat.id,uid); return
         if (await st.get_value('repost_enabled','false'))=='true' and await contains_known_media(msg):
             await delete(bot,msg)
@@ -100,6 +90,7 @@ async def moderate_message(bot:Bot,msg:Message):
             await track(msg.chat.id,warn.message_id,None,'temp',False)
             return
         await record_media(msg)
+        await record_visual_hashes(msg, bot)
     # Liens interdits pour tout le monde sauf admins; trusted supprimé sans sanction
     if has_link(text):
         await delete(bot,msg)
